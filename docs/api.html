@@ -1,0 +1,1786 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PredictMarket API Reference</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #222536;
+    --border: #2e3147;
+    --text: #e2e8f0;
+    --muted: #8892a4;
+    --accent: #6366f1;
+    --accent-light: #818cf8;
+    --green: #22c55e;
+    --yellow: #f59e0b;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --purple: #a855f7;
+    --cyan: #06b6d4;
+    --get: #22c55e;
+    --post: #6366f1;
+    --put: #f59e0b;
+    --patch: #06b6d4;
+    --delete: #ef4444;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.6; }
+  a { color: var(--accent-light); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+  .sidebar { width: 260px; min-width: 260px; background: var(--surface); border-right: 1px solid var(--border); position: sticky; top: 0; height: 100vh; overflow-y: auto; padding: 0 0 40px; }
+  .main { flex: 1; max-width: 900px; padding: 40px 48px; overflow-x: hidden; }
+
+  /* Sidebar */
+  .sidebar-logo { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo h1 { font-size: 16px; font-weight: 700; color: var(--text); }
+  .sidebar-logo span { font-size: 11px; color: var(--muted); display: block; margin-top: 2px; }
+  .sidebar-section { padding: 16px 20px 4px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); }
+  .sidebar-link { display: flex; align-items: center; gap: 8px; padding: 6px 20px; color: var(--muted); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  .sidebar-link:hover { color: var(--text); background: var(--surface2); }
+  .sidebar-link.active { color: var(--accent-light); background: rgba(99,102,241,0.1); }
+  .method-badge-sm { font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; min-width: 36px; text-align: center; }
+  .get-sm { background: rgba(34,197,94,0.15); color: var(--get); }
+  .post-sm { background: rgba(99,102,241,0.15); color: var(--post); }
+  .put-sm { background: rgba(245,158,11,0.15); color: var(--put); }
+  .patch-sm { background: rgba(6,182,212,0.15); color: var(--patch); }
+  .delete-sm { background: rgba(239,68,68,0.15); color: var(--delete); }
+
+  /* Main content */
+  .page-title { margin-bottom: 8px; }
+  .page-title h1 { font-size: 32px; font-weight: 800; background: linear-gradient(135deg, var(--accent-light), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+  .page-title p { color: var(--muted); font-size: 15px; margin-top: 8px; }
+
+  .info-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin: 28px 0; }
+  .info-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; }
+  .info-card .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px; }
+  .info-card .value { font-size: 13px; font-weight: 600; color: var(--text); font-family: 'SF Mono', 'Monaco', monospace; }
+
+  .section { margin-top: 52px; scroll-margin-top: 24px; }
+  .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+  .section-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 16px; }
+  .section-header h2 { font-size: 20px; font-weight: 700; }
+  .section-desc { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+
+  /* Endpoint */
+  .endpoint { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 12px; overflow: hidden; }
+  .endpoint-header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; cursor: pointer; user-select: none; }
+  .endpoint-header:hover { background: var(--surface2); }
+  .method-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 5px; min-width: 52px; text-align: center; letter-spacing: 0.03em; }
+  .get { background: rgba(34,197,94,0.15); color: var(--get); border: 1px solid rgba(34,197,94,0.25); }
+  .post { background: rgba(99,102,241,0.15); color: var(--post); border: 1px solid rgba(99,102,241,0.25); }
+  .put { background: rgba(245,158,11,0.15); color: var(--put); border: 1px solid rgba(245,158,11,0.25); }
+  .patch { background: rgba(6,182,212,0.15); color: var(--patch); border: 1px solid rgba(6,182,212,0.25); }
+  .delete { background: rgba(239,68,68,0.15); color: var(--delete); border: 1px solid rgba(239,68,68,0.25); }
+  .endpoint-path { font-family: 'SF Mono', 'Monaco', monospace; font-size: 13px; color: var(--text); flex: 1; }
+  .endpoint-path .param { color: var(--accent-light); }
+  .endpoint-summary { font-size: 12px; color: var(--muted); margin-left: auto; }
+  .auth-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(99,102,241,0.12); color: var(--accent-light); border: 1px solid rgba(99,102,241,0.2); }
+  .public-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(34,197,94,0.1); color: var(--green); border: 1px solid rgba(34,197,94,0.2); }
+  .admin-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.2); }
+  .internal-tag { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 4px; background: rgba(245,158,11,0.1); color: var(--yellow); border: 1px solid rgba(245,158,11,0.2); }
+
+  .endpoint-body { padding: 0 18px 18px; border-top: 1px solid var(--border); display: none; }
+  .endpoint-body.open { display: block; }
+  .endpoint-body .summary-text { color: var(--muted); font-size: 13px; margin: 14px 0 12px; }
+
+  .params-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  .params-table th { text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
+  .params-table td { padding: 8px 10px; border-bottom: 1px solid rgba(46,49,71,0.5); font-size: 13px; vertical-align: top; }
+  .params-table tr:last-child td { border-bottom: none; }
+  .field-name { font-family: 'SF Mono', 'Monaco', monospace; color: var(--accent-light); }
+  .field-type { font-family: 'SF Mono', 'Monaco', monospace; color: var(--cyan); font-size: 12px; }
+  .required { color: var(--red); font-size: 10px; font-weight: 700; margin-left: 4px; }
+  .optional { color: var(--muted); font-size: 10px; margin-left: 4px; }
+  .field-desc { color: var(--muted); font-size: 12px; }
+
+  .sub-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
+  .sub-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  pre { background: #0a0c12; border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; font-size: 12px; line-height: 1.7; font-family: 'SF Mono', 'Monaco', 'Menlo', monospace; }
+  .key { color: #7dd3fc; }
+  .str { color: #86efac; }
+  .num { color: #fca5a5; }
+  .bool { color: #c4b5fd; }
+  .comment { color: #4b5563; font-style: italic; }
+
+  /* Special sections */
+  .callout { border-radius: 8px; padding: 14px 18px; margin: 16px 0; display: flex; gap: 12px; font-size: 13px; }
+  .callout-info { background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); }
+  .callout-warn { background: rgba(245,158,11,0.08); border: 1px solid rgba(245,158,11,0.2); }
+  .callout-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .callout-text { color: var(--muted); }
+  .callout-text strong { color: var(--text); display: block; margin-bottom: 4px; }
+
+  .flow-steps { counter-reset: steps; }
+  .flow-step { display: flex; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .flow-step:last-child { border-bottom: none; }
+  .step-num { counter-increment: steps; width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: white; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0; }
+  .step-body { flex: 1; }
+  .step-title { font-weight: 600; font-size: 14px; margin-bottom: 4px; }
+  .step-desc { color: var(--muted); font-size: 13px; }
+
+  table.limits-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.limits-table th { background: var(--surface2); padding: 10px 14px; text-align: left; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); border: 1px solid var(--border); }
+  table.limits-table td { padding: 10px 14px; border: 1px solid var(--border); }
+  table.limits-table tr:nth-child(even) td { background: rgba(255,255,255,0.015); }
+  .tier-0 { color: var(--muted); }
+  .tier-1 { color: var(--yellow); }
+  .tier-2 { color: var(--green); }
+
+  .ws-event { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; margin-bottom: 10px; }
+  .ws-event-name { font-family: 'SF Mono', 'Monaco', monospace; font-size: 13px; color: var(--accent-light); font-weight: 600; margin-bottom: 6px; }
+  .ws-event-dir { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; margin-left: 8px; }
+  .emit { background: rgba(6,182,212,0.1); color: var(--cyan); border: 1px solid rgba(6,182,212,0.2); }
+  .receive { background: rgba(168,85,247,0.1); color: var(--purple); border: 1px solid rgba(168,85,247,0.2); }
+  .ws-event-desc { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+
+  .error-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .error-item { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+  .error-code { font-size: 20px; font-weight: 800; color: var(--red); font-family: 'SF Mono', 'Monaco', monospace; }
+  .error-name { font-size: 12px; font-weight: 600; color: var(--text); margin: 4px 0 2px; }
+  .error-desc { font-size: 11px; color: var(--muted); }
+
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { padding: 24px 20px; }
+    .info-grid { grid-template-columns: 1fr; }
+    .error-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">
+      <h1>PredictMarket</h1>
+      <span>API Reference v1.0</span>
+    </div>
+
+    <div class="sidebar-section">Overview</div>
+    <a href="#overview" class="sidebar-link">Introduction</a>
+    <a href="#auth-flow" class="sidebar-link">Auth Flow</a>
+    <a href="#kyc-limits" class="sidebar-link">KYC & Limits</a>
+    <a href="#websocket" class="sidebar-link">WebSocket</a>
+    <a href="#errors" class="sidebar-link">Error Codes</a>
+
+    <div class="sidebar-section">Endpoints</div>
+    <a href="#auth" class="sidebar-link"><span class="method-badge-sm post-sm">POST</span> Authentication</a>
+    <a href="#users" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Users</a>
+    <a href="#markets" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Markets</a>
+    <a href="#trades" class="sidebar-link"><span class="method-badge-sm post-sm">POST</span> Trades</a>
+    <a href="#wallet" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Wallet</a>
+    <a href="#payments" class="sidebar-link"><span class="method-badge-sm post-sm">POST</span> Payments</a>
+    <a href="#notifications" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Notifications</a>
+    <a href="#feed" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Feed</a>
+    <a href="#analytics" class="sidebar-link"><span class="method-badge-sm get-sm">GET</span> Analytics</a>
+
+    <div class="sidebar-section">Admin Panel</div>
+    <a href="#admin" class="sidebar-link"><span class="method-badge-sm post-sm">ALL</span> Admin API</a>
+  </nav>
+
+  <!-- Main -->
+  <main class="main">
+
+    <!-- Overview -->
+    <section id="overview" class="section" style="margin-top: 0;">
+      <div class="page-title">
+        <h1>PredictMarket API</h1>
+        <p>Prediction market platform — REST API + WebSocket reference for web and admin developers.</p>
+      </div>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="label">Base URL (Dev)</div>
+          <div class="value">http://localhost:3000</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Content-Type</div>
+          <div class="value">application/json</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Currency</div>
+          <div class="value">KES (Kenyan Shilling)</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Auth Scheme</div>
+          <div class="value">Bearer {accessToken}</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Access Token TTL</div>
+          <div class="value">15 minutes</div>
+        </div>
+        <div class="info-card">
+          <div class="label">Rate Limit</div>
+          <div class="value">120 req/min per IP</div>
+        </div>
+      </div>
+
+      <div class="callout callout-info">
+        <div class="callout-icon">ℹ️</div>
+        <div class="callout-text">
+          <strong>All amounts are in KES (integer or float)</strong>
+          Wallet balances, trade amounts, deposits, and withdrawals are all denominated in Kenyan Shillings. Shares are priced at KES 10/share. A 4% rake is applied on market resolution.
+        </div>
+      </div>
+
+      <div class="callout callout-warn">
+        <div class="callout-icon">⚠️</div>
+        <div class="callout-text">
+          <strong>Access token expiry</strong>
+          Access tokens expire in 15 minutes. Use <code>POST /auth/refresh</code> with the refresh token (30-day TTL) to get a new pair. Store both tokens securely.
+        </div>
+      </div>
+    </section>
+
+    <!-- Auth Flow -->
+    <section id="auth-flow" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(99,102,241,0.15);">🔐</div>
+        <h2>Authentication Flow</h2>
+      </div>
+
+      <div class="flow-steps">
+        <div class="flow-step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">Register — <code>POST /auth/register</code></div>
+            <div class="step-desc">Submit phone number (Kenyan format: <code>0712345678</code> or <code>+254712345678</code>) + password (min 8 chars). An OTP SMS is sent immediately. Returns <code>{ message, phone }</code>.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">Verify Phone — <code>POST /auth/verify-phone</code></div>
+            <div class="step-desc">Submit the 6-digit OTP. Returns <code>{ accessToken, refreshToken, user }</code>. Account is now active.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">Login — <code>POST /auth/login</code></div>
+            <div class="step-desc">For returning users. Returns <code>{ accessToken, refreshToken, user }</code>.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <div class="step-title">Use Bearer Token</div>
+            <div class="step-desc">Include <code>Authorization: Bearer {accessToken}</code> in every authenticated request header.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">5</div>
+          <div class="step-body">
+            <div class="step-title">Refresh — <code>POST /auth/refresh</code></div>
+            <div class="step-desc">When the access token expires, call this with the refresh token. Returns a new <code>{ accessToken, refreshToken }</code> pair. Refresh tokens are rotated on each use — store the new one.</div>
+          </div>
+        </div>
+        <div class="flow-step">
+          <div class="step-num">6</div>
+          <div class="step-body">
+            <div class="step-title">Logout — <code>POST /auth/logout</code></div>
+            <div class="step-desc">Revokes the refresh token server-side. Clear both tokens from client storage.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- KYC & Limits -->
+    <section id="kyc-limits" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(34,197,94,0.15);">✅</div>
+        <h2>KYC Tiers &amp; Limits</h2>
+      </div>
+      <p class="section-desc">KYC tier is embedded in the JWT payload as <code>kycTier</code>. Limits are enforced server-side.</p>
+
+      <table class="limits-table">
+        <thead>
+          <tr>
+            <th>Tier</th>
+            <th>Status</th>
+            <th>Trading</th>
+            <th>Deposit / day</th>
+            <th>Withdrawal / day</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong class="tier-0">0</strong></td>
+            <td class="tier-0">Phone verified only</td>
+            <td class="tier-0">Allowed</td>
+            <td class="tier-0">KES 50,000</td>
+            <td class="tier-0">Not allowed</td>
+          </tr>
+          <tr>
+            <td><strong class="tier-1">1</strong></td>
+            <td class="tier-1">ID submitted (pending)</td>
+            <td class="tier-1">Allowed</td>
+            <td class="tier-1">KES 150,000</td>
+            <td class="tier-1">KES 70,000 / day</td>
+          </tr>
+          <tr>
+            <td><strong class="tier-2">2</strong></td>
+            <td class="tier-2">KYC approved</td>
+            <td class="tier-2">Allowed</td>
+            <td class="tier-2">KES 300,000</td>
+            <td class="tier-2">KES 150,000 / day</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout callout-info" style="margin-top: 16px;">
+        <div class="callout-icon">ℹ️</div>
+        <div class="callout-text">
+          <strong>KYC upgrade flow</strong>
+          User submits <code>POST /users/me/kyc/start</code> with doc type, document number, and optional image URLs. Admin reviews via admin panel and approves/rejects. On approval tier moves to 2.
+        </div>
+      </div>
+    </section>
+
+    <!-- WebSocket -->
+    <section id="websocket" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(168,85,247,0.15);">⚡</div>
+        <h2>WebSocket</h2>
+      </div>
+      <p class="section-desc">Connect to <code>ws://localhost:3000</code> (Socket.io). Pass the access token as a query param or auth header on connect.</p>
+
+      <div class="callout callout-info">
+        <div class="callout-icon">ℹ️</div>
+        <div class="callout-text">
+          <strong>Automatic rooms</strong>
+          On connection, the gateway automatically joins the socket to <code>user:{userId}</code> room for private events. You do not need to subscribe manually.
+        </div>
+      </div>
+
+      <div class="sub-label">Client → Server</div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">subscribe:market <span class="ws-event-dir emit">emit</span></div>
+        <div class="ws-event-desc">Join a market's price channel. Send the market ID string.</div>
+        <pre><span class="comment">// Connect</span>
+socket.<span class="key">emit</span>(<span class="str">'subscribe:market'</span>, <span class="str">'market-uuid-here'</span>);</pre>
+      </div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">unsubscribe:market <span class="ws-event-dir emit">emit</span></div>
+        <div class="ws-event-desc">Leave a market's price channel.</div>
+        <pre>socket.<span class="key">emit</span>(<span class="str">'unsubscribe:market'</span>, <span class="str">'market-uuid-here'</span>);</pre>
+      </div>
+
+      <div class="sub-label">Server → Client</div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">market:price <span class="ws-event-dir receive">receive</span></div>
+        <div class="ws-event-desc">Real-time price update after each trade. Fires to all subscribers of <code>market:{id}</code> room.</div>
+        <pre>{
+  <span class="key">"marketId"</span>: <span class="str">"uuid"</span>,
+  <span class="key">"yesPrice"</span>: <span class="num">0.62</span>,   <span class="comment">// 0.00 – 1.00</span>
+  <span class="key">"noPrice"</span>:  <span class="num">0.38</span>,
+  <span class="key">"yesPool"</span>:  <span class="num">31200</span>,  <span class="comment">// total KES in YES pool</span>
+  <span class="key">"noPool"</span>:   <span class="num">19600</span>,
+  <span class="key">"updatedAt"</span>: <span class="str">"2024-01-15T10:30:00.000Z"</span>
+}</pre>
+      </div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">wallet:refetch <span class="ws-event-dir receive">receive</span></div>
+        <div class="ws-event-desc">Tells client to re-fetch wallet balance. Fires on deposit confirmed or withdrawal completed. Sent to <code>user:{userId}</code> room only.</div>
+        <pre>{
+  <span class="key">"userId"</span>: <span class="str">"uuid"</span>,
+  <span class="key">"reason"</span>: <span class="str">"deposit"</span>  <span class="comment">// "deposit" | "withdrawal" | "settlement"</span>
+}</pre>
+      </div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">payment:update <span class="ws-event-dir receive">receive</span></div>
+        <div class="ws-event-desc">Payment status change (STK pushed, confirmed, failed). Sent to <code>user:{userId}</code> room only.</div>
+        <pre>{
+  <span class="key">"paymentId"</span>: <span class="str">"uuid"</span>,
+  <span class="key">"type"</span>:      <span class="str">"deposit"</span>,   <span class="comment">// "deposit" | "withdrawal"</span>
+  <span class="key">"status"</span>:    <span class="str">"COMPLETED"</span>, <span class="comment">// "PENDING" | "COMPLETED" | "FAILED"</span>
+  <span class="key">"amountKes"</span>: <span class="num">500</span>
+}</pre>
+      </div>
+
+      <div class="ws-event">
+        <div class="ws-event-name">market:settled <span class="ws-event-dir receive">receive</span></div>
+        <div class="ws-event-desc">When a market resolves and the user held a position. Sent to <code>user:{userId}</code> room only.</div>
+        <pre>{
+  <span class="key">"marketId"</span>:      <span class="str">"uuid"</span>,
+  <span class="key">"marketTitle"</span>:   <span class="str">"Will KES/USD reach 130 by Dec 2024?"</span>,
+  <span class="key">"winningOutcome"</span>: <span class="str">"YES"</span>,
+  <span class="key">"outcome"</span>:        <span class="str">"YES"</span>,  <span class="comment">// user's outcome</span>
+  <span class="key">"payoutKes"</span>:      <span class="num">1450</span>,
+  <span class="key">"sharesHeld"</span>:     <span class="num">100</span>
+}</pre>
+      </div>
+    </section>
+
+    <!-- Error Codes -->
+    <section id="errors" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(239,68,68,0.15);">🚨</div>
+        <h2>Error Codes</h2>
+      </div>
+      <p class="section-desc">All errors follow NestJS standard shape: <code>{ statusCode, message, error }</code>.</p>
+
+      <div class="error-grid">
+        <div class="error-item">
+          <div class="error-code">400</div>
+          <div class="error-name">Bad Request</div>
+          <div class="error-desc">Validation failed. <code>message</code> is an array of field errors from class-validator.</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">401</div>
+          <div class="error-name">Unauthorized</div>
+          <div class="error-desc">Missing, expired, or invalid access token. Re-authenticate or refresh.</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">403</div>
+          <div class="error-name">Forbidden</div>
+          <div class="error-desc">Authenticated but insufficient role (e.g. non-admin hitting admin route).</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">404</div>
+          <div class="error-name">Not Found</div>
+          <div class="error-desc">Resource does not exist or belongs to another user.</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">409</div>
+          <div class="error-name">Conflict</div>
+          <div class="error-desc">Duplicate (phone already registered, idempotency key reuse).</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">422</div>
+          <div class="error-name">Unprocessable Entity</div>
+          <div class="error-desc">Business rule violation (insufficient balance, market not ACTIVE, over daily limit).</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">429</div>
+          <div class="error-name">Too Many Requests</div>
+          <div class="error-desc">Rate limit exceeded (120 req/min per IP at gateway).</div>
+        </div>
+        <div class="error-item">
+          <div class="error-code">500</div>
+          <div class="error-name">Internal Server Error</div>
+          <div class="error-desc">Unexpected error. Retry with exponential back-off.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- AUTH -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="auth" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(99,102,241,0.15);">🔑</div>
+        <h2>Authentication</h2>
+      </div>
+      <p class="section-desc">All auth endpoints are at <code>/auth/*</code>. No bearer token required unless noted.</p>
+
+      <!-- POST /auth/register -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/register</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Register new account</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Register with phone number and password. An OTP is sent via SMS to verify the phone.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Kenyan number: <code>0712345678</code> or <code>+254712345678</code></td></tr>
+            <tr><td class="field-name">password <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Min 8 characters</td></tr>
+            <tr><td class="field-name">email <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">Valid email address</td></tr>
+          </table>
+          <div class="sub-label">Response 201</div>
+          <pre>{
+  <span class="key">"message"</span>: <span class="str">"Registration successful. OTP sent to +254712345678"</span>,
+  <span class="key">"phone"</span>: <span class="str">"+254712345678"</span>
+}</pre>
+          <div class="sub-label">Errors</div>
+          <div class="field-desc">409 — phone already registered</div>
+        </div>
+      </div>
+
+      <!-- POST /auth/verify-phone -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/verify-phone</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Verify OTP → get tokens</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Verify the 6-digit OTP sent to phone. Returns token pair on success.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Same phone used during registration</td></tr>
+            <tr><td class="field-name">otp <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Exactly 6 digits</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"accessToken"</span>:  <span class="str">"eyJ..."</span>,   <span class="comment">// JWT RS256, 15min</span>
+  <span class="key">"refreshToken"</span>: <span class="str">"uuid-opaque-token"</span>,  <span class="comment">// 30 days</span>
+  <span class="key">"user"</span>: {
+    <span class="key">"id"</span>:       <span class="str">"uuid"</span>,
+    <span class="key">"phone"</span>:    <span class="str">"+254712345678"</span>,
+    <span class="key">"role"</span>:     <span class="str">"USER"</span>,
+    <span class="key">"kycTier"</span>:  <span class="num">0</span>
+  }
+}</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/login -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/login</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Login with phone + password</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Returns access + refresh token pair. Records IP and user-agent for session tracking.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Registered phone number</td></tr>
+            <tr><td class="field-name">password <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc"></td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"accessToken"</span>:  <span class="str">"eyJ..."</span>,
+  <span class="key">"refreshToken"</span>: <span class="str">"uuid-opaque-token"</span>,
+  <span class="key">"user"</span>: { <span class="key">"id"</span>: <span class="str">"uuid"</span>, <span class="key">"phone"</span>: <span class="str">"..."</span>, <span class="key">"role"</span>: <span class="str">"USER"</span>, <span class="key">"kycTier"</span>: <span class="num">0</span> }
+}</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/refresh -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/refresh</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Rotate refresh token</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Exchange a valid refresh token for a new access + refresh pair. Old refresh token is invalidated.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">refreshToken <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Opaque token from login/verify</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"accessToken"</span>: <span class="str">"eyJ..."</span>, <span class="key">"refreshToken"</span>: <span class="str">"new-uuid-token"</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/logout -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/logout</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Revoke refresh token</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Invalidates the refresh token server-side. Clear both tokens from client storage.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">refreshToken <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">The current refresh token to revoke</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"message"</span>: <span class="str">"Logged out"</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/request-otp -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/request-otp</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Request a new OTP</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Request a new OTP for a specific purpose (phone verification, withdrawal confirmation, etc.).</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Phone number to send OTP to</td></tr>
+            <tr><td class="field-name">purpose <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">e.g. <code>"phone_verify"</code>, <code>"withdrawal"</code>, <code>"reset_password"</code></td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"message"</span>: <span class="str">"OTP sent"</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/reset-password -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/reset-password</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Request password reset OTP</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Step 1 of password reset. Sends a 6-digit OTP to the phone.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"message"</span>: <span class="str">"OTP sent for password reset"</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /auth/reset-password/confirm -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/auth/reset-password/confirm</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Confirm password reset</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Step 2 of password reset. Verifies OTP and sets new password.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Phone number</td></tr>
+            <tr><td class="field-name">otp <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">6-digit code from SMS</td></tr>
+            <tr><td class="field-name">newPassword <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Min 8 characters</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"message"</span>: <span class="str">"Password reset successful"</span> }</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- USERS -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="users" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(34,197,94,0.15);">👤</div>
+        <h2>Users</h2>
+      </div>
+      <p class="section-desc">Profile management, KYC submission, and referrals. All <code>/users/*</code> routes require a valid bearer token.</p>
+
+      <!-- GET /users/me -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/users/me</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Get own profile</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"id"</span>:           <span class="str">"uuid"</span>,
+  <span class="key">"phone"</span>:        <span class="str">"+254712345678"</span>,
+  <span class="key">"email"</span>:        <span class="str">"user@example.com"</span>,
+  <span class="key">"displayName"</span>:  <span class="str">"John Kamau"</span>,
+  <span class="key">"bio"</span>:          <span class="str">"Prediction trader"</span>,
+  <span class="key">"role"</span>:         <span class="str">"USER"</span>,
+  <span class="key">"kycTier"</span>:      <span class="num">0</span>,
+  <span class="key">"kycStatus"</span>:    <span class="str">"NONE"</span>,  <span class="comment">// NONE | ID_SUBMITTED | APPROVED | REJECTED</span>
+  <span class="key">"referralCode"</span>: <span class="str">"ABC123"</span>,
+  <span class="key">"createdAt"</span>:    <span class="str">"2024-01-01T00:00:00.000Z"</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- PUT /users/me -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge put">PUT</span>
+          <span class="endpoint-path">/users/me</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Update profile</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th></tr>
+            <tr><td class="field-name">displayName <span class="optional">optional</span></td><td class="field-type">string</td></tr>
+            <tr><td class="field-name">bio <span class="optional">optional</span></td><td class="field-type">string</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — updated user object</div>
+        </div>
+      </div>
+
+      <!-- GET /users/me/kyc -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/users/me/kyc</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Get KYC status</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"kycTier"</span>:      <span class="num">0</span>,
+  <span class="key">"kycStatus"</span>:    <span class="str">"NONE"</span>,
+  <span class="key">"submittedAt"</span>:  <span class="bool">null</span>,
+  <span class="key">"reviewedAt"</span>:   <span class="bool">null</span>,
+  <span class="key">"reviewNote"</span>:   <span class="bool">null</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- POST /users/me/kyc/start -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/users/me/kyc/start</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Submit KYC documents</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Initiates KYC. Upload document images to your CDN/storage first, then pass the URLs here.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">docType <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc"><code>"NATIONAL_ID"</code>, <code>"PASSPORT"</code>, <code>"DRIVING_LICENSE"</code></td></tr>
+            <tr><td class="field-name">docNumber <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">Document number</td></tr>
+            <tr><td class="field-name">frontUrl <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">URL to front-of-document image</td></tr>
+            <tr><td class="field-name">backUrl <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">URL to back-of-document image</td></tr>
+            <tr><td class="field-name">selfieUrl <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">URL to selfie image</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"kycStatus"</span>: <span class="str">"ID_SUBMITTED"</span>, <span class="key">"kycTier"</span>: <span class="num">1</span> }</pre>
+        </div>
+      </div>
+
+      <!-- GET /users/me/referrals -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/users/me/referrals</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Get referral stats</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"referralCode"</span>: <span class="str">"ABC123"</span>,
+  <span class="key">"referralLink"</span>: <span class="str">"https://predictmarket.ke/r/ABC123"</span>,
+  <span class="key">"totalReferrals"</span>: <span class="num">5</span>,
+  <span class="key">"totalEarned"</span>:   <span class="num">250</span>  <span class="comment">// KES bonus earned from referrals</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /users/:id/profile -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/users/<span class="param">:id</span>/profile</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Get public profile</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Returns public-facing profile (no phone/email). Useful for leaderboard pages.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"id"</span>:          <span class="str">"uuid"</span>,
+  <span class="key">"displayName"</span>: <span class="str">"John Kamau"</span>,
+  <span class="key">"bio"</span>:         <span class="str">"Prediction trader"</span>,
+  <span class="key">"kycTier"</span>:     <span class="num">2</span>
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- MARKETS -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="markets" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(6,182,212,0.15);">📊</div>
+        <h2>Markets</h2>
+      </div>
+      <p class="section-desc">Browse and query prediction markets. Public endpoints need no auth.</p>
+
+      <!-- GET /markets -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/markets</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">List markets</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20, max: 100</td></tr>
+            <tr><td class="field-name">status</td><td class="field-type">string</td><td class="field-desc"><code>DRAFT</code> | <code>ACTIVE</code> | <code>CLOSED</code> | <code>RESOLVED</code> | <code>CANCELLED</code></td></tr>
+            <tr><td class="field-name">category</td><td class="field-type">string</td><td class="field-desc">Category slug (from <code>/markets/categories</code>)</td></tr>
+            <tr><td class="field-name">search</td><td class="field-type">string</td><td class="field-desc">Full-text search on title</td></tr>
+            <tr><td class="field-name">sortBy</td><td class="field-type">string</td><td class="field-desc"><code>createdAt</code> | <code>volume</code> | <code>closesAt</code></td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"id"</span>:           <span class="str">"uuid"</span>,
+      <span class="key">"slug"</span>:         <span class="str">"will-kes-usd-reach-130"</span>,
+      <span class="key">"title"</span>:        <span class="str">"Will KES/USD reach 130 by Dec 2024?"</span>,
+      <span class="key">"description"</span>:  <span class="str">"..."</span>,
+      <span class="key">"category"</span>:     <span class="str">"forex"</span>,
+      <span class="key">"status"</span>:       <span class="str">"ACTIVE"</span>,
+      <span class="key">"yesPool"</span>:      <span class="num">31200</span>,
+      <span class="key">"noPool"</span>:       <span class="num">19600</span>,
+      <span class="key">"yesPrice"</span>:     <span class="num">0.614</span>,  <span class="comment">// implied probability</span>
+      <span class="key">"noPrice"</span>:      <span class="num">0.386</span>,
+      <span class="key">"totalVolume"</span>:  <span class="num">50800</span>,
+      <span class="key">"closesAt"</span>:     <span class="str">"2024-12-31T23:59:59.000Z"</span>,
+      <span class="key">"resolvesAt"</span>:   <span class="str">"2025-01-07T00:00:00.000Z"</span>,
+      <span class="key">"resolvedAt"</span>:   <span class="bool">null</span>,
+      <span class="key">"winningOutcome"</span>: <span class="bool">null</span>,
+      <span class="key">"createdAt"</span>:    <span class="str">"2024-01-15T10:00:00.000Z"</span>
+    }
+  ],
+  <span class="key">"total"</span>: <span class="num">142</span>,
+  <span class="key">"page"</span>: <span class="num">1</span>,
+  <span class="key">"limit"</span>: <span class="num">20</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /markets/categories -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/markets/categories</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">List categories</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>[
+  { <span class="key">"slug"</span>: <span class="str">"politics"</span>,  <span class="key">"name"</span>: <span class="str">"Politics"</span>,  <span class="key">"activeCount"</span>: <span class="num">12</span> },
+  { <span class="key">"slug"</span>: <span class="str">"sports"</span>,    <span class="key">"name"</span>: <span class="str">"Sports"</span>,    <span class="key">"activeCount"</span>: <span class="num">34</span> },
+  { <span class="key">"slug"</span>: <span class="str">"forex"</span>,     <span class="key">"name"</span>: <span class="str">"Forex"</span>,     <span class="key">"activeCount"</span>: <span class="num">8</span>  },
+  { <span class="key">"slug"</span>: <span class="str">"economy"</span>,   <span class="key">"name"</span>: <span class="str">"Economy"</span>,   <span class="key">"activeCount"</span>: <span class="num">5</span>  }
+]</pre>
+        </div>
+      </div>
+
+      <!-- GET /markets/:idOrSlug -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/markets/<span class="param">:idOrSlug</span></span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Get market detail</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Accepts both UUID (<code>/markets/abc-123-...</code>) and slug (<code>/markets/will-kes-usd-reach-130</code>).</div>
+          <div class="sub-label">Response 200 — full market object (same shape as list item)</div>
+        </div>
+      </div>
+
+      <!-- GET /markets/:id/history -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/markets/<span class="param">:id</span>/history</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Get price history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">hours</td><td class="field-type">number</td><td class="field-desc">Default: 24. Lookback window in hours.</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>[
+  { <span class="key">"timestamp"</span>: <span class="str">"2024-01-15T08:00:00.000Z"</span>, <span class="key">"yesPrice"</span>: <span class="num">0.52</span>, <span class="key">"noPrice"</span>: <span class="num">0.48</span> },
+  { <span class="key">"timestamp"</span>: <span class="str">"2024-01-15T09:00:00.000Z"</span>, <span class="key">"yesPrice"</span>: <span class="num">0.58</span>, <span class="key">"noPrice"</span>: <span class="num">0.42</span> }
+]</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- TRADES -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="trades" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(245,158,11,0.15);">💹</div>
+        <h2>Trades</h2>
+      </div>
+      <p class="section-desc">Parimutuel pool trading. Shares are KES 10 each. 4% rake on resolution. Minimum trade: KES 10.</p>
+
+      <div class="callout callout-info">
+        <div class="callout-icon">ℹ️</div>
+        <div class="callout-text">
+          <strong>Idempotency</strong>
+          Every <code>POST /trades</code> requires a client-generated <code>idempotencyKey</code>. If a request is retried with the same key, the server returns the original trade instead of creating a duplicate. Generate a UUID per trade attempt.
+        </div>
+      </div>
+
+      <!-- POST /trades -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/trades</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Place a trade</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">marketId <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">UUID of an ACTIVE market</td></tr>
+            <tr><td class="field-name">outcome <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc"><code>"YES"</code> or <code>"NO"</code></td></tr>
+            <tr><td class="field-name">amountKes <span class="required">*</span></td><td class="field-type">number</td><td class="field-desc">Min KES 10. Must be a multiple of 10 (= whole shares).</td></tr>
+            <tr><td class="field-name">idempotencyKey <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Client-generated UUID. Prevents duplicate trades on retry.</td></tr>
+          </table>
+          <div class="sub-label">Response 201</div>
+          <pre>{
+  <span class="key">"tradeId"</span>:      <span class="str">"uuid"</span>,
+  <span class="key">"marketId"</span>:     <span class="str">"uuid"</span>,
+  <span class="key">"outcome"</span>:      <span class="str">"YES"</span>,
+  <span class="key">"amountKes"</span>:    <span class="num">200</span>,
+  <span class="key">"sharesCount"</span>:  <span class="num">20</span>,    <span class="comment">// amountKes / 10</span>
+  <span class="key">"priceAtTrade"</span>: <span class="num">0.614</span>,  <span class="comment">// implied prob at time of trade</span>
+  <span class="key">"status"</span>:       <span class="str">"CONFIRMED"</span>,
+  <span class="key">"createdAt"</span>:    <span class="str">"2024-01-15T10:30:00.000Z"</span>
+}</pre>
+          <div class="sub-label">Errors</div>
+          <div class="field-desc">422 — insufficient wallet balance; 422 — market not ACTIVE; 422 — daily limit exceeded</div>
+        </div>
+      </div>
+
+      <!-- GET /trades/me -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/trades/me</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Own trade history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20</td></tr>
+            <tr><td class="field-name">marketId</td><td class="field-type">string</td><td class="field-desc">Filter by market</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — paginated list of trade objects</div>
+        </div>
+      </div>
+
+      <!-- GET /trades/me/positions -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/trades/me/positions</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Current open positions</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">All markets where the user currently holds shares in an unresolved market.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>[
+  {
+    <span class="key">"marketId"</span>:    <span class="str">"uuid"</span>,
+    <span class="key">"marketTitle"</span>: <span class="str">"Will KES/USD reach 130?"</span>,
+    <span class="key">"outcome"</span>:     <span class="str">"YES"</span>,
+    <span class="key">"sharesHeld"</span>:  <span class="num">20</span>,
+    <span class="key">"costKes"</span>:     <span class="num">200</span>,
+    <span class="key">"currentValue"</span>: <span class="num">245.60</span>  <span class="comment">// estimated at current pool price</span>
+  }
+]</pre>
+        </div>
+      </div>
+
+      <!-- GET /trades/me/positions/:marketId -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/trades/me/positions/<span class="param">:marketId</span></span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Position in one market</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200 — single position object (same shape as above)</div>
+        </div>
+      </div>
+
+      <!-- GET /trades/markets/:marketId -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/trades/markets/<span class="param">:marketId</span></span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Public market trade history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Anonymized list of recent trades for a market. User identities are hidden.</div>
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"outcome"</span>:      <span class="str">"YES"</span>,
+      <span class="key">"amountKes"</span>:    <span class="num">200</span>,
+      <span class="key">"sharesCount"</span>:  <span class="num">20</span>,
+      <span class="key">"createdAt"</span>:    <span class="str">"2024-01-15T10:30:00.000Z"</span>
+    }
+  ],
+  <span class="key">"total"</span>: <span class="num">387</span>
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- WALLET -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="wallet" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(34,197,94,0.15);">💰</div>
+        <h2>Wallet</h2>
+      </div>
+      <p class="section-desc">User wallet balance and ledger. The <code>/internal/*</code> endpoints are service-to-service only (require <code>x-internal-key</code> header) — do not call these from the frontend.</p>
+
+      <!-- GET /wallet/me -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/wallet/me</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Get wallet balance</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"userId"</span>:          <span class="str">"uuid"</span>,
+  <span class="key">"balanceKes"</span>:      <span class="num">4250.00</span>,
+  <span class="key">"reservedKes"</span>:     <span class="num">200.00</span>,  <span class="comment">// locked in pending trades</span>
+  <span class="key">"availableKes"</span>:    <span class="num">4050.00</span>,  <span class="comment">// balanceKes - reservedKes</span>
+  <span class="key">"updatedAt"</span>:       <span class="str">"2024-01-15T10:30:00.000Z"</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /wallet/me/ledger -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/wallet/me/ledger</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Transaction history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"id"</span>:           <span class="str">"uuid"</span>,
+      <span class="key">"type"</span>:         <span class="str">"DEPOSIT"</span>,  <span class="comment">// DEPOSIT | WITHDRAWAL | TRADE_DEBIT | TRADE_CREDIT | SETTLEMENT | REFUND | BONUS</span>
+      <span class="key">"amountKes"</span>:    <span class="num">500</span>,
+      <span class="key">"balanceAfter"</span>: <span class="num">4250</span>,
+      <span class="key">"description"</span>:  <span class="str">"M-Pesa deposit from 0712345678"</span>,
+      <span class="key">"referenceId"</span>:  <span class="str">"payment-uuid"</span>,
+      <span class="key">"createdAt"</span>:    <span class="str">"2024-01-15T09:00:00.000Z"</span>
+    }
+  ],
+  <span class="key">"total"</span>: <span class="num">54</span>
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- PAYMENTS -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="payments" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(34,197,94,0.15);">📱</div>
+        <h2>Payments (M-Pesa)</h2>
+      </div>
+      <p class="section-desc">Deposits via STK Push. Withdrawals via B2C. All amounts in KES. Tier limits apply.</p>
+
+      <div class="callout callout-warn">
+        <div class="callout-icon">⚠️</div>
+        <div class="callout-text">
+          <strong>Withdrawal requires OTP</strong>
+          Before calling <code>POST /payments/withdrawals/initiate</code>, call <code>POST /auth/request-otp</code> with <code>purpose: "withdrawal"</code>. Include the 6-digit OTP in the request body.
+        </div>
+      </div>
+
+      <!-- POST /payments/deposits/initiate -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/payments/deposits/initiate</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Initiate STK Push deposit</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Triggers an M-Pesa STK Push to the user's phone. User enters PIN on their phone. Poll <code>/payments/deposits/:id/status</code> or listen to <code>payment:update</code> WebSocket event.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">amountKes <span class="required">*</span></td><td class="field-type">number</td><td class="field-desc">Min KES 10. Daily limits apply (KES 50k/150k/300k by tier).</td></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Safaricom number in Kenyan format. Can differ from registered phone.</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"paymentId"</span>:   <span class="str">"uuid"</span>,
+  <span class="key">"status"</span>:      <span class="str">"PENDING"</span>,
+  <span class="key">"checkoutRequestId"</span>: <span class="str">"ws_CO_..."</span>,  <span class="comment">// Safaricom reference</span>
+  <span class="key">"message"</span>:     <span class="str">"STK Push sent to 0712345678. Enter M-Pesa PIN."</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /payments/deposits/:id/status -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/payments/deposits/<span class="param">:id</span>/status</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Poll deposit status</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Poll every 3–5 seconds after initiating. Usually resolves within 30s. Use WebSocket for real-time updates instead.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"paymentId"</span>: <span class="str">"uuid"</span>,
+  <span class="key">"status"</span>:    <span class="str">"COMPLETED"</span>,  <span class="comment">// PENDING | COMPLETED | FAILED | CANCELLED</span>
+  <span class="key">"amountKes"</span>: <span class="num">500</span>,
+  <span class="key">"mpesaCode"</span>: <span class="str">"QDJ8XXXXXXX"</span>,  <span class="comment">// M-Pesa transaction code, null if pending</span>
+  <span class="key">"updatedAt"</span>: <span class="str">"2024-01-15T10:05:30.000Z"</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /payments/deposits -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/payments/deposits</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Deposit history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — paginated deposit list</div>
+        </div>
+      </div>
+
+      <!-- POST /payments/withdrawals/initiate -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/payments/withdrawals/initiate</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Initiate withdrawal (requires OTP)</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Initiates an M-Pesa B2C transfer to the user's phone. Requires OTP sent via <code>POST /auth/request-otp</code>. KYC tier ≥ 1 required.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Rules</th></tr>
+            <tr><td class="field-name">amountKes <span class="required">*</span></td><td class="field-type">number</td><td class="field-desc">Min KES 100. Daily limits apply (KES 70k/150k by tier).</td></tr>
+            <tr><td class="field-name">phone <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Safaricom number (Kenyan format)</td></tr>
+            <tr><td class="field-name">otp <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">6-digit OTP from <code>/auth/request-otp</code> with <code>purpose: "withdrawal"</code></td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"paymentId"</span>: <span class="str">"uuid"</span>,
+  <span class="key">"status"</span>:    <span class="str">"PENDING"</span>,
+  <span class="key">"message"</span>:   <span class="str">"Withdrawal initiated. Funds will arrive shortly."</span>
+}</pre>
+          <div class="sub-label">Errors</div>
+          <div class="field-desc">422 — insufficient balance; 422 — daily limit exceeded; 403 — KYC tier 0 cannot withdraw; 401 — invalid OTP</div>
+        </div>
+      </div>
+
+      <!-- GET /payments/withdrawals/:id/status -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/payments/withdrawals/<span class="param">:id</span>/status</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Poll withdrawal status</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200 — same shape as deposit status</div>
+        </div>
+      </div>
+
+      <!-- GET /payments/withdrawals -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/payments/withdrawals</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Withdrawal history</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200 — paginated withdrawal list</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- NOTIFICATIONS -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="notifications" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(168,85,247,0.15);">🔔</div>
+        <h2>Notifications</h2>
+      </div>
+      <p class="section-desc">In-app notifications and device token registration for push notifications (FCM).</p>
+
+      <!-- GET /notifications -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/notifications</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">List notifications</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"id"</span>:        <span class="str">"uuid"</span>,
+      <span class="key">"type"</span>:      <span class="str">"TRADE_CONFIRMED"</span>,
+      <span class="key">"title"</span>:     <span class="str">"Trade placed"</span>,
+      <span class="key">"body"</span>:      <span class="str">"You bought 20 YES shares on Will KES/USD reach 130?"</span>,
+      <span class="key">"isRead"</span>:    <span class="bool">false</span>,
+      <span class="key">"createdAt"</span>: <span class="str">"2024-01-15T10:30:00.000Z"</span>
+    }
+  ],
+  <span class="key">"total"</span>: <span class="num">12</span>,
+  <span class="key">"unreadCount"</span>: <span class="num">3</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- PATCH /notifications/:id/read -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge patch">PATCH</span>
+          <span class="endpoint-path">/notifications/<span class="param">:id</span>/read</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Mark as read</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Marks a single notification as read. Returns 204 No Content.</div>
+        </div>
+      </div>
+
+      <!-- PATCH /notifications/read-all -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge patch">PATCH</span>
+          <span class="endpoint-path">/notifications/read-all</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Mark all as read</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Marks all unread notifications as read. Returns 204 No Content.</div>
+        </div>
+      </div>
+
+      <!-- POST /notifications/device-tokens -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/notifications/device-tokens</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Register FCM device token</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Register or update an FCM token for push notifications. Call after login and whenever the token refreshes.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">token <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">FCM registration token from Firebase SDK</td></tr>
+            <tr><td class="field-name">platform <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc"><code>"android"</code>, <code>"ios"</code>, or <code>"web"</code></td></tr>
+          </table>
+          <div class="sub-label">Response 204 No Content</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- FEED -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="feed" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(6,182,212,0.15);">📰</div>
+        <h2>Feed</h2>
+      </div>
+      <p class="section-desc">Activity and discovery feeds.</p>
+
+      <!-- GET /feed/activity -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/feed/activity</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Personal activity feed</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Events related to this user: trades, payouts, deposits, market resolutions. Capped at 50 most recent items.</div>
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"type"</span>:      <span class="str">"TRADE_PLACED"</span>,
+      <span class="key">"marketId"</span>:  <span class="str">"uuid"</span>,
+      <span class="key">"payload"</span>:   { <span class="key">"outcome"</span>: <span class="str">"YES"</span>, <span class="key">"amountKes"</span>: <span class="num">200</span> },
+      <span class="key">"createdAt"</span>: <span class="str">"2024-01-15T10:30:00.000Z"</span>
+    }
+  ]
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /feed/discovery -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/feed/discovery</span>
+          <span class="public-tag">public</span>
+          <span class="endpoint-summary">Discovery feed (trending markets)</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Active markets sorted by trading volume. No auth required — suitable for landing page.</div>
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — paginated list of market summaries (same shape as <code>GET /markets</code>)</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- ANALYTICS -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="analytics" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(245,158,11,0.15);">🏆</div>
+        <h2>Analytics</h2>
+      </div>
+      <p class="section-desc">Leaderboards and aggregated stats. Leaderboard is recomputed every hour.</p>
+
+      <!-- GET /analytics/leaderboard -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/analytics/leaderboard</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Get leaderboard</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">period</td><td class="field-type">string</td><td class="field-desc">Default: <code>"weekly"</code>. Also: <code>"daily"</code>, <code>"monthly"</code>, <code>"alltime"</code></td></tr>
+            <tr><td class="field-name">category</td><td class="field-type">string</td><td class="field-desc">Default: <code>"OVERALL"</code>. Also: <code>"POLITICS"</code>, <code>"SPORTS"</code>, <code>"FOREX"</code></td></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"period"</span>:   <span class="str">"weekly"</span>,
+  <span class="key">"category"</span>: <span class="str">"OVERALL"</span>,
+  <span class="key">"data"</span>: [
+    {
+      <span class="key">"rank"</span>:         <span class="num">1</span>,
+      <span class="key">"userId"</span>:       <span class="str">"uuid"</span>,
+      <span class="key">"displayName"</span>:  <span class="str">"Top Trader"</span>,
+      <span class="key">"profitKes"</span>:    <span class="num">14200</span>,
+      <span class="key">"tradeCount"</span>:   <span class="num">87</span>,
+      <span class="key">"winRate"</span>:      <span class="num">0.68</span>
+    }
+  ],
+  <span class="key">"total"</span>: <span class="num">1402</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /analytics/markets/:id/stats -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/analytics/markets/<span class="param">:id</span>/stats</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">Market stats</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"marketId"</span>:       <span class="str">"uuid"</span>,
+  <span class="key">"dailyVolume"</span>:    <span class="num">12400</span>,
+  <span class="key">"weeklyVolume"</span>:   <span class="num">87200</span>,
+  <span class="key">"totalVolume"</span>:    <span class="num">320500</span>,
+  <span class="key">"uniqueTraders"</span>:  <span class="num">234</span>,
+  <span class="key">"tradeCount"</span>:     <span class="num">1820</span>
+}</pre>
+        </div>
+      </div>
+
+      <!-- GET /analytics/users/:id/stats -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/analytics/users/<span class="param">:id</span>/stats</span>
+          <span class="auth-tag">auth</span>
+          <span class="endpoint-summary">User trading stats</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200</div>
+          <pre>{
+  <span class="key">"userId"</span>:       <span class="str">"uuid"</span>,
+  <span class="key">"totalTrades"</span>:  <span class="num">87</span>,
+  <span class="key">"totalVolume"</span>:  <span class="num">43500</span>,
+  <span class="key">"totalProfit"</span>:  <span class="num">7200</span>,
+  <span class="key">"winRate"</span>:      <span class="num">0.68</span>,
+  <span class="key">"marketsTraded"</span>: <span class="num">23</span>
+}</pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <!-- ADMIN -->
+    <!-- ═══════════════════════════════════════════════════════════════════════ -->
+    <section id="admin" class="section">
+      <div class="section-header">
+        <div class="section-icon" style="background: rgba(239,68,68,0.15);">🛡️</div>
+        <h2>Admin API</h2>
+      </div>
+      <p class="section-desc">All admin endpoints require a bearer token with role <code>ADMIN</code> or <code>SUPER_ADMIN</code>. Available via the admin-service on port 3009, or through the gateway at the same paths.</p>
+
+      <div class="callout callout-warn">
+        <div class="callout-icon">⚠️</div>
+        <div class="callout-text">
+          <strong>Admin panel base URL</strong>
+          Admin endpoints are prefixed <code>/admin/...</code>. The admin panel should target the gateway: <code>http://localhost:3000/admin/...</code>
+        </div>
+      </div>
+
+      <div class="sub-label">Market Management</div>
+
+      <!-- GET /admin/markets -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/admin/markets</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">List all markets</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">status</td><td class="field-type">string</td><td class="field-desc"><code>DRAFT</code> | <code>ACTIVE</code> | <code>CLOSED</code> | <code>RESOLVED</code> | <code>CANCELLED</code></td></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number</td><td class="field-desc">Default: 1</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number</td><td class="field-desc">Default: 20</td></tr>
+          </table>
+        </div>
+      </div>
+
+      <!-- POST /admin/markets -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/markets</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Create market</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">title <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Market question (min 10 chars)</td></tr>
+            <tr><td class="field-name">description <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Detailed description</td></tr>
+            <tr><td class="field-name">category <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">Category slug</td></tr>
+            <tr><td class="field-name">closesAt <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">ISO 8601 datetime — trading deadline</td></tr>
+            <tr><td class="field-name">resolvesAt <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc">ISO 8601 datetime — resolution deadline (must be after closesAt)</td></tr>
+            <tr><td class="field-name">imageUrl <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">Cover image URL</td></tr>
+            <tr><td class="field-name">tags <span class="optional">optional</span></td><td class="field-type">string[]</td><td class="field-desc">Array of tag strings</td></tr>
+          </table>
+          <div class="sub-label">Response 201 — created market object (status: DRAFT)</div>
+          <div class="callout callout-info" style="margin-top: 12px; margin-bottom: 0;">
+            <div class="callout-icon">ℹ️</div>
+            <div class="callout-text">Markets start in DRAFT status. Call <code>POST /admin/markets/:id/activate</code> to open for trading.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- POST /admin/markets/:id/activate -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/markets/<span class="param">:id</span>/activate</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Activate market</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Transitions market from DRAFT → ACTIVE. Users can now place trades.</div>
+          <div class="sub-label">Response 200 — updated market object</div>
+        </div>
+      </div>
+
+      <!-- POST /admin/markets/:id/resolve -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/markets/<span class="param">:id</span>/resolve</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Resolve market</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Resolves the market with a winning outcome. Triggers automatic settlement: winners receive payouts from the pool (4% rake deducted). Market must be in CLOSED or ACTIVE status.</div>
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th><th>Notes</th></tr>
+            <tr><td class="field-name">outcome <span class="required">*</span></td><td class="field-type">string</td><td class="field-desc"><code>"YES"</code> or <code>"NO"</code></td></tr>
+            <tr><td class="field-name">note <span class="optional">optional</span></td><td class="field-type">string</td><td class="field-desc">Resolution note / source citation</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — resolved market object</div>
+        </div>
+      </div>
+
+      <!-- POST /admin/markets/:id/cancel -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/markets/<span class="param">:id</span>/cancel</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Cancel market</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Cancels the market and triggers full refunds to all position holders. No request body required.</div>
+          <div class="sub-label">Response 200 — cancelled market object</div>
+        </div>
+      </div>
+
+      <div class="sub-label">KYC Management</div>
+
+      <!-- GET /admin/kyc/pending -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/admin/kyc/pending</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">List pending KYC</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Returns users with <code>kycStatus: "ID_SUBMITTED"</code> awaiting review.</div>
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — paginated list of user profiles with KYC doc details</div>
+        </div>
+      </div>
+
+      <!-- POST /admin/kyc/:userId/approve -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/kyc/<span class="param">:userId</span>/approve</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Approve KYC</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Approves user KYC. Sets <code>kycTier → 2</code>, <code>kycStatus → APPROVED</code>. No request body.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"kycStatus"</span>: <span class="str">"APPROVED"</span>, <span class="key">"kycTier"</span>: <span class="num">2</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /admin/kyc/:userId/reject -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/kyc/<span class="param">:userId</span>/reject</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Reject KYC</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Request Body</div>
+          <table class="params-table">
+            <tr><th>Field</th><th>Type</th></tr>
+            <tr><td class="field-name">reason <span class="required">*</span></td><td class="field-type">string</td></tr>
+          </table>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"kycStatus"</span>: <span class="str">"REJECTED"</span>, <span class="key">"reviewNote"</span>: <span class="str">"ID image blurry"</span> }</pre>
+        </div>
+      </div>
+
+      <div class="sub-label">User Management</div>
+
+      <!-- GET /admin/users -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/admin/users</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">List users</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Query Parameters</div>
+          <table class="params-table">
+            <tr><th>Param</th><th>Type</th></tr>
+            <tr><td class="field-name">page</td><td class="field-type">number (default: 1)</td></tr>
+            <tr><td class="field-name">limit</td><td class="field-type">number (default: 20)</td></tr>
+          </table>
+          <div class="sub-label">Response 200 — paginated user list with full profiles</div>
+        </div>
+      </div>
+
+      <!-- GET /admin/users/:id -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge get">GET</span>
+          <span class="endpoint-path">/admin/users/<span class="param">:id</span></span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Get user detail</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="sub-label">Response 200 — full user profile including KYC details, tier, join date</div>
+        </div>
+      </div>
+
+      <!-- POST /admin/users/:id/suspend -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/users/<span class="param">:id</span>/suspend</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Suspend user</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Suspends a user account. Suspended users cannot trade or withdraw. No request body.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"isSuspended"</span>: <span class="bool">true</span> }</pre>
+        </div>
+      </div>
+
+      <!-- POST /admin/users/:id/unsuspend -->
+      <div class="endpoint">
+        <div class="endpoint-header" onclick="toggle(this)">
+          <span class="method-badge post">POST</span>
+          <span class="endpoint-path">/admin/users/<span class="param">:id</span>/unsuspend</span>
+          <span class="admin-tag">admin</span>
+          <span class="endpoint-summary">Unsuspend user</span>
+        </div>
+        <div class="endpoint-body">
+          <div class="summary-text">Restores access to a suspended account. No request body.</div>
+          <div class="sub-label">Response 200</div>
+          <pre>{ <span class="key">"isSuspended"</span>: <span class="bool">false</span> }</pre>
+        </div>
+      </div>
+
+    </section>
+
+    <div style="margin-top: 60px; padding-top: 24px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12px;">
+      PredictMarket API Reference — Generated June 2025 — For internal developer use
+    </div>
+
+  </main>
+</div>
+
+<script>
+function toggle(header) {
+  const body = header.nextElementSibling;
+  body.classList.toggle('open');
+}
+
+// Highlight active sidebar link on scroll
+const sections = document.querySelectorAll('.section');
+const links = document.querySelectorAll('.sidebar-link');
+
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      links.forEach(l => l.classList.remove('active'));
+      const id = entry.target.id;
+      const link = document.querySelector(`.sidebar-link[href="#${id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { threshold: 0.2, rootMargin: '-20% 0px -60% 0px' });
+
+sections.forEach(s => observer.observe(s));
+
+// Open all endpoints with a search feature (Ctrl+K stub)
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    // Allow native browser search
+  }
+});
+</script>
+</body>
+</html>

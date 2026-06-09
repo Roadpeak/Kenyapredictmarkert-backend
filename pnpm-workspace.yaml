@@ -1,2 +1,9 @@
 packages:
   - 'packages/*'
+  - 'apps/*'
+  - 'libs/shared/kafka-client'
+  - 'libs/shared/prisma-client'
+  - 'libs/shared/exceptions'
+  - 'libs/shared/decorators'
+  - 'libs/shared/types'
+  - 'libs/shared/utils'

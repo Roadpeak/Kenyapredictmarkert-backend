@@ -1,0 +1,122 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/market-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Market {
+  id              String         @id @default(cuid())
+  slug            String         @unique
+  title           String
+  description     String         @db.Text
+  longDescription String?        @db.Text
+  category        String
+  tags            String[]
+  imageUrl        String?
+  sourceUrl       String?
+
+  status          MarketStatus   @default(DRAFT)
+  resolution      ResolutionType @default(MANUAL)
+
+  openAt          DateTime
+  closeAt         DateTime
+  resolveAt       DateTime?
+  resolvedAt      DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  resolvedOutcome Outcome?
+  resolutionNote  String?
+  resolvedBy      String?
+
+  poolYesKes  Decimal @default(0) @db.Decimal(15, 2)
+  poolNoKes   Decimal @default(0) @db.Decimal(15, 2)
+  totalVolume Decimal @default(0) @db.Decimal(15, 2)
+  tradeCount  Int     @default(0)
+  rake        Decimal @default(0.04) @db.Decimal(4, 3)
+
+  seedYesKes Decimal @default(1000) @db.Decimal(15, 2)
+  seedNoKes  Decimal @default(1000) @db.Decimal(15, 2)
+
+  createdBy String
+
+  outcomes      MarketOutcome[]
+  feedConfig    FeedConfig?
+  priceHistory  PriceSnapshot[]
+
+  @@index([status, category])
+  @@index([closeAt])
+  @@index([slug])
+  @@map("markets")
+}
+
+model MarketOutcome {
+  id       String  @id @default(cuid())
+  marketId String
+  label    Outcome
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([marketId, label])
+  @@map("market_outcomes")
+}
+
+model PriceSnapshot {
+  id         String   @id @default(cuid())
+  marketId   String
+  yesPrice   Decimal  @db.Decimal(6, 4)
+  noPrice    Decimal  @db.Decimal(6, 4)
+  volume     Decimal  @db.Decimal(15, 2)
+  snapshotAt DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId, snapshotAt])
+  @@map("price_snapshots")
+}
+
+model FeedConfig {
+  id          String    @id @default(cuid())
+  marketId    String    @unique
+  feedType    FeedType
+  feedSource  String
+  feedQuery   Json
+  lastChecked DateTime?
+  lastResult  Json?
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@map("feed_configs")
+}
+
+enum MarketStatus {
+  DRAFT
+  ACTIVE
+  CLOSED
+  RESOLVED
+  CANCELLED
+  DISPUTED
+}
+
+enum Outcome {
+  YES
+  NO
+}
+
+enum ResolutionType {
+  MANUAL
+  AUTOMATED_FEED
+  ORACLE
+}
+
+enum FeedType {
+  SPORTS_API
+  NEWS_SCRAPER
+  MANUAL_ORACLE
+  CRYPTO_PRICE
+  WEATHER_API
+}

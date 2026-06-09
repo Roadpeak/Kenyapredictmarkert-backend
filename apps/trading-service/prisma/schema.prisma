@@ -1,0 +1,102 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/trading-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model MarketPool {
+  id          String   @id @default(cuid())
+  marketId    String   @unique
+  poolYesKes  Decimal  @default(0) @db.Decimal(15, 2)
+  poolNoKes   Decimal  @default(0) @db.Decimal(15, 2)
+  totalShares Decimal  @default(0) @db.Decimal(18, 6)
+  yesShares   Decimal  @default(0) @db.Decimal(18, 6)
+  noShares    Decimal  @default(0) @db.Decimal(18, 6)
+  rake        Decimal  @default(0.04) @db.Decimal(4, 3)
+  version     Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  @@map("market_pools")
+}
+
+model Trade {
+  id             String      @id @default(cuid())
+  userId         String
+  marketId       String
+  outcome        Outcome
+  amountKes      Decimal     @db.Decimal(15, 2)
+  sharesReceived Decimal     @db.Decimal(18, 6)
+  pricePerShare  Decimal     @db.Decimal(6, 4)
+  poolYesAtTrade Decimal     @db.Decimal(15, 2)
+  poolNoAtTrade  Decimal     @db.Decimal(15, 2)
+  status         TradeStatus @default(PENDING)
+  idempotencyKey String      @unique
+  settledAt      DateTime?
+  payoutKes      Decimal?    @db.Decimal(15, 2)
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@index([userId, marketId])
+  @@index([marketId, createdAt])
+  @@index([userId, createdAt])
+  @@map("trades")
+}
+
+model Position {
+  id           String   @id @default(cuid())
+  userId       String
+  marketId     String
+  outcome      Outcome
+  totalShares  Decimal  @db.Decimal(18, 6)
+  totalCostKes Decimal  @db.Decimal(15, 2)
+  avgPriceKes  Decimal  @db.Decimal(6, 4)
+  isSettled    Boolean  @default(false)
+  payoutKes    Decimal? @db.Decimal(15, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([userId, marketId, outcome])
+  @@index([marketId])
+  @@index([userId])
+  @@map("positions")
+}
+
+model Settlement {
+  id           String           @id @default(cuid())
+  marketId     String
+  userId       String
+  outcome      Outcome
+  sharesHeld   Decimal          @db.Decimal(18, 6)
+  payoutKes    Decimal          @db.Decimal(15, 2)
+  status       SettlementStatus @default(PENDING)
+  settledAt    DateTime?
+  createdAt    DateTime         @default(now())
+
+  @@unique([marketId, userId, outcome])
+  @@index([marketId])
+  @@map("settlements")
+}
+
+enum Outcome {
+  YES
+  NO
+}
+
+enum TradeStatus {
+  PENDING
+  CONFIRMED
+  SETTLED
+  REFUNDED
+  FAILED
+}
+
+enum SettlementStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}

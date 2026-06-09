@@ -1,0 +1,65 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/notification-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  userId    String
+  type      NotificationType
+  channel   NotificationChannel
+  title     String
+  body      String
+  data      Json?
+  status    NotificationStatus @default(PENDING)
+  sentAt    DateTime?
+  readAt    DateTime?
+  createdAt DateTime           @default(now())
+
+  @@index([userId, createdAt])
+  @@index([userId, status])
+  @@map("notifications")
+}
+
+model DeviceToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  platform  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+enum NotificationType {
+  TRADE_CONFIRMED
+  TRADE_SETTLED
+  MARKET_RESOLVED
+  DEPOSIT_CONFIRMED
+  WITHDRAWAL_COMPLETED
+  WITHDRAWAL_FAILED
+  MARKET_CLOSING_SOON
+  KYC_APPROVED
+  KYC_REJECTED
+  GENERAL
+}
+
+enum NotificationChannel {
+  SMS
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+  READ
+}

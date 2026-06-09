@@ -16,6 +16,15 @@
     "skipLibCheck": true,
     "strict": true,
     "target": "es2022",
-    "customConditions": ["@org/source"]
+    "customConditions": ["@org/source"],
+    "baseUrl": ".",
+    "paths": {
+      "@org/types": ["libs/shared/types/src/index.ts"],
+      "@org/kafka-client": ["libs/shared/kafka-client/src/index.ts"],
+      "@org/exceptions": ["libs/shared/exceptions/src/index.ts"],
+      "@org/decorators": ["libs/shared/decorators/src/index.ts"],
+      "@org/utils": ["libs/shared/utils/src/index.ts"],
+      "@org/prisma-client": ["libs/shared/prisma-client/src/index.ts"]
+    }
   }
 }

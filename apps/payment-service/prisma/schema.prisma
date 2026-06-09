@@ -1,0 +1,91 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/payment-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Payment {
+  id                  String        @id @default(cuid())
+  userId              String
+  type                PaymentType
+  status              PaymentStatus @default(INITIATED)
+  amountKes           Decimal       @db.Decimal(15, 2)
+  phoneNumber         String
+  merchantRequestId   String?
+  checkoutRequestId   String?
+  mpesaReceiptNumber  String?
+  conversationId      String?
+  originatorConvId    String?
+  initiatedAt         DateTime      @default(now())
+  confirmedAt         DateTime?
+  failedAt            DateTime?
+  failureReason       String?
+  retryCount          Int           @default(0)
+  lastRetryAt         DateTime?
+  idempotencyKey      String        @unique
+  metadata            Json?
+
+  callbacks PaymentCallback[]
+
+  @@index([userId, status])
+  @@index([merchantRequestId])
+  @@index([checkoutRequestId])
+  @@index([mpesaReceiptNumber])
+  @@map("payments")
+}
+
+model PaymentCallback {
+  id         String   @id @default(cuid())
+  paymentId  String
+  rawPayload Json
+  receivedAt DateTime @default(now())
+
+  payment Payment @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@map("payment_callbacks")
+}
+
+model MpesaCredential {
+  id             String    @id @default(cuid())
+  shortCode      String
+  environment    String
+  consumerKey    String
+  consumerSecret String
+  accessToken    String?
+  tokenExpiresAt DateTime?
+  updatedAt      DateTime  @updatedAt
+
+  @@map("mpesa_credentials")
+}
+
+model DailyLimitTracker {
+  id        String  @id @default(cuid())
+  userId    String
+  date      String
+  deposited Decimal @default(0) @db.Decimal(15, 2)
+  withdrawn Decimal @default(0) @db.Decimal(15, 2)
+
+  @@unique([userId, date])
+  @@index([userId])
+  @@map("daily_limit_trackers")
+}
+
+enum PaymentType {
+  DEPOSIT
+  WITHDRAWAL
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING_MPESA
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}

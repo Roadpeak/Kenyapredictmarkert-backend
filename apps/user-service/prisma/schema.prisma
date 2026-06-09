@@ -1,0 +1,86 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/user-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model UserProfile {
+  id             String    @id
+  phone          String    @unique
+  displayName    String?
+  avatarUrl      String?
+  bio            String?
+  kycStatus      KycStatus @default(NONE)
+  kycTier        Int       @default(0)
+  withdrawLimit  Decimal   @default(0) @db.Decimal(15, 2)
+  depositLimit   Decimal   @default(50000) @db.Decimal(15, 2)
+  referralCode   String    @unique
+  referredBy     String?
+  totalReferrals Int       @default(0)
+  isSuspended    Boolean   @default(false)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  kycDocuments KycDocument[]
+  preference   UserPreference?
+
+  @@map("user_profiles")
+}
+
+model KycDocument {
+  id           String      @id @default(cuid())
+  userId       String
+  docType      DocType
+  docNumber    String?
+  frontUrl     String?
+  backUrl      String?
+  selfieUrl    String?
+  status       DocStatus   @default(PENDING)
+  reviewedBy   String?
+  reviewedAt   DateTime?
+  rejectedNote String?
+  createdAt    DateTime    @default(now())
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("kyc_documents")
+}
+
+model UserPreference {
+  id                 String  @id @default(cuid())
+  userId             String  @unique
+  emailNotifications Boolean @default(true)
+  smsNotifications   Boolean @default(true)
+  pushNotifications  Boolean @default(true)
+  defaultCategory    String?
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_preferences")
+}
+
+enum KycStatus {
+  NONE
+  PENDING
+  PHONE_VERIFIED
+  ID_SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum DocType {
+  NATIONAL_ID
+  PASSPORT
+  DRIVING_LICENSE
+}
+
+enum DocStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}

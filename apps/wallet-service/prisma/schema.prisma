@@ -1,0 +1,68 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/wallet-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Wallet {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  balance          Decimal  @default(0) @db.Decimal(15, 2)
+  reservedBalance  Decimal  @default(0) @db.Decimal(15, 2)
+  lifetimeDeposit  Decimal  @default(0) @db.Decimal(15, 2)
+  lifetimeWithdraw Decimal  @default(0) @db.Decimal(15, 2)
+  lifetimePayout   Decimal  @default(0) @db.Decimal(15, 2)
+  currency         String   @default("KES")
+  version          Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  ledgerEntries LedgerEntry[]
+
+  @@map("wallets")
+}
+
+model LedgerEntry {
+  id            String     @id @default(cuid())
+  walletId      String
+  userId        String
+  type          LedgerType
+  direction     Direction
+  amount        Decimal    @db.Decimal(15, 2)
+  balanceBefore Decimal    @db.Decimal(15, 2)
+  balanceAfter  Decimal    @db.Decimal(15, 2)
+  referenceId   String
+  referenceType String
+  description   String?
+  metadata      Json?
+  createdAt     DateTime   @default(now())
+
+  wallet Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
+  @@index([userId, type])
+  @@index([referenceId])
+  @@map("ledger_entries")
+}
+
+enum LedgerType {
+  DEPOSIT
+  WITHDRAWAL
+  TRADE_RESERVE
+  TRADE_RELEASE
+  TRADE_DEBIT
+  PAYOUT
+  REFUND
+  RAKE_DEBIT
+  BONUS_CREDIT
+  REFERRAL_BONUS
+}
+
+enum Direction {
+  CREDIT
+  DEBIT
+}

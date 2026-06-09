@@ -2,5 +2,90 @@
   "extends": "./tsconfig.base.json",
   "compileOnSave": false,
   "files": [],
-  "references": []
+  "references": [
+    {
+      "path": "./apps/api-gateway-e2e"
+    },
+    {
+      "path": "./apps/api-gateway"
+    },
+    {
+      "path": "./apps/auth-service-e2e"
+    },
+    {
+      "path": "./apps/auth-service"
+    },
+    {
+      "path": "./apps/user-service-e2e"
+    },
+    {
+      "path": "./apps/user-service"
+    },
+    {
+      "path": "./apps/market-service-e2e"
+    },
+    {
+      "path": "./apps/market-service"
+    },
+    {
+      "path": "./apps/trading-service-e2e"
+    },
+    {
+      "path": "./apps/trading-service"
+    },
+    {
+      "path": "./apps/wallet-service-e2e"
+    },
+    {
+      "path": "./apps/wallet-service"
+    },
+    {
+      "path": "./apps/payment-service-e2e"
+    },
+    {
+      "path": "./apps/payment-service"
+    },
+    {
+      "path": "./apps/notification-service-e2e"
+    },
+    {
+      "path": "./apps/notification-service"
+    },
+    {
+      "path": "./apps/feed-service-e2e"
+    },
+    {
+      "path": "./apps/feed-service"
+    },
+    {
+      "path": "./apps/admin-service-e2e"
+    },
+    {
+      "path": "./apps/admin-service"
+    },
+    {
+      "path": "./apps/analytics-service-e2e"
+    },
+    {
+      "path": "./apps/analytics-service"
+    },
+    {
+      "path": "./libs/shared/kafka-client"
+    },
+    {
+      "path": "./libs/shared/prisma-client"
+    },
+    {
+      "path": "./libs/shared/exceptions"
+    },
+    {
+      "path": "./libs/shared/decorators"
+    },
+    {
+      "path": "./libs/shared/types"
+    },
+    {
+      "path": "./libs/shared/utils"
+    }
+  ]
 }

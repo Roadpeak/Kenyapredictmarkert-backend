@@ -1,0 +1,53 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/analytics-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model TradeEvent {
+  id            String   @id @default(cuid())
+  tradeId       String   @unique
+  userId        String
+  marketId      String
+  outcome       String
+  amountKes     Decimal  @db.Decimal(15, 2)
+  pricePerShare Decimal  @db.Decimal(6, 4)
+  occurredAt    DateTime @default(now())
+
+  @@index([marketId, occurredAt])
+  @@index([userId, occurredAt])
+  @@map("trade_events")
+}
+
+model LeaderboardEntry {
+  id           String   @id @default(cuid())
+  userId       String
+  period       String
+  category     String   @default("OVERALL")
+  pnlKes       Decimal  @db.Decimal(15, 2)
+  volumeKes    Decimal  @db.Decimal(15, 2)
+  tradeCount   Int      @default(0)
+  rank         Int?
+  computedAt   DateTime @default(now())
+
+  @@unique([userId, period, category])
+  @@index([period, category, pnlKes])
+  @@map("leaderboard_entries")
+}
+
+model MarketVolume {
+  id          String   @id @default(cuid())
+  marketId    String
+  volumeKes   Decimal  @db.Decimal(15, 2)
+  tradeCount  Int
+  period      String
+  computedAt  DateTime @default(now())
+
+  @@unique([marketId, period])
+  @@index([period])
+  @@map("market_volumes")
+}
