@@ -12,16 +12,13 @@ for svc in "${SERVICES[@]}"; do
   echo "→ prisma $CMD: $svc"
   if [ "$CMD" = "generate" ]; then
     pnpm exec prisma generate \
-      --schema="apps/$svc/prisma/schema.prisma" \
-      --config="apps/$svc/prisma/prisma.config.ts"
+      --schema="apps/$svc/prisma/schema.prisma"
   elif [ "$CMD" = "migrate" ]; then
     pnpm exec prisma migrate deploy \
-      --schema="apps/$svc/prisma/schema.prisma" \
-      --config="apps/$svc/prisma/prisma.config.ts"
+      --schema="apps/$svc/prisma/schema.prisma"
   elif [ "$CMD" = "migrate:dev" ]; then
     pnpm exec prisma migrate dev \
       --schema="apps/$svc/prisma/schema.prisma" \
-      --config="apps/$svc/prisma/prisma.config.ts" \
       --name "init"
   elif [ "$CMD" = "studio" ]; then
     echo "Run manually: pnpm exec prisma studio --schema=apps/$svc/prisma/schema.prisma"
