@@ -23,8 +23,18 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 # ─── 3. Build all 11 services + generate Prisma clients ───────────────────────
 FROM deps AS build
+# Disable Nx Cloud (no daemon inside container) and skip TTY-only interactivity.
+ENV NX_NO_CLOUD=true \
+    NX_DAEMON=false \
+    CI=true
+
 # Prisma generate for every service that has a schema.
 RUN pnpm run prisma:generate
+
+# nx sync applies pending TypeScript project-reference updates so the build
+# doesn't bail with "workspace is out of sync".
+RUN pnpm exec nx sync
+
 # Build all 11 microservices in one nx run.
 RUN pnpm exec nx run-many --target=build \
     --projects=api-gateway,auth-service,user-service,market-service,trading-service,wallet-service,payment-service,notification-service,feed-service,admin-service,analytics-service \
