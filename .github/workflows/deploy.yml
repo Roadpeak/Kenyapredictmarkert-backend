@@ -179,6 +179,13 @@ jobs:
 
             docker compose -f docker-compose.prod.yml pull
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
+
+            # nginx caches upstream DNS resolution failures during the brief
+            # window when app containers are being recreated. Restart it so
+            # it re-resolves fresh — otherwise every request 502s until the
+            # cached entry expires. Cheap: nginx boots in <1s.
+            docker compose -f docker-compose.prod.yml restart nginx
+
             docker image prune -f
 
       - name: Verify running containers
