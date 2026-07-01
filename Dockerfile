@@ -16,6 +16,8 @@ COPY nx.json tsconfig.base.json tsconfig.json ./
 COPY apps ./apps
 COPY libs ./libs
 COPY packages ./packages
+# scripts/ is needed at build time: pnpm run prisma:generate → scripts/prisma-all.sh
+COPY scripts ./scripts
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
