@@ -35,7 +35,16 @@ RUN pnpm run prisma:generate
 # doesn't bail with "workspace is out of sync".
 RUN pnpm exec nx sync
 
-# Build all 11 microservices in one nx run.
+# Build shared libs first — apps import them via package name (@org/*) and
+# webpack resolves through node_modules where pnpm has symlinked each lib.
+# Those symlinks' package.json points at ./dist/index.js, so apps fail to
+# resolve them until the libs' dist/ exists.
+RUN pnpm exec nx run-many --target=build \
+    --projects=types,exceptions,decorators,utils,kafka-client,prisma-client \
+    --parallel=4 \
+    --skip-nx-cache
+
+# Now build all 11 microservices.
 RUN pnpm exec nx run-many --target=build \
     --projects=api-gateway,auth-service,user-service,market-service,trading-service,wallet-service,payment-service,notification-service,feed-service,admin-service,analytics-service \
     --parallel=4 \
