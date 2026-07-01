@@ -62,7 +62,7 @@ jobs:
           host: ${{ secrets.DROPLET_HOST }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
-          source: "docker-compose.prod.yml,nginx/nginx.conf,scripts/init-databases.sql"
+          source: "docker-compose.prod.yml,nginx/nginx.conf,scripts/init-databases.sql,scripts/create-kafka-topics.sh"
           target: "/opt/kenyapredict/"
           overwrite: true
 

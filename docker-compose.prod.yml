@@ -15,7 +15,9 @@ x-app: &app-base
     redis:
       condition: service_healthy
     kafka:
-      condition: service_started
+      condition: service_healthy
+    kafka-init:
+      condition: service_completed_successfully
   env_file:
     - .env
   environment:
@@ -92,6 +94,23 @@ services:
       timeout: 10s
       retries: 10
       start_period: 40s
+    networks: [app_net]
+
+  # One-shot topic bootstrap. Runs after kafka is healthy, creates every topic
+  # the app expects (script uses --if-not-exists → idempotent, safe to re-run
+  # every `compose up`). Not tied to a deploy — survives droplet rebuilds,
+  # ops.yml stop-all/start-all, manual restarts.
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    depends_on:
+      kafka:
+        condition: service_healthy
+    restart: "no"
+    volumes:
+      - ./scripts/create-kafka-topics.sh:/tmp/create-kafka-topics.sh:ro
+    environment:
+      KAFKA_BROKERS: kafka:9092
+    entrypoint: ["bash", "/tmp/create-kafka-topics.sh"]
     networks: [app_net]
 
   # ─── 11 NestJS microservices — all share the same image ────────────────────
