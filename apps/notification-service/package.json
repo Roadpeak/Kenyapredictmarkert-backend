@@ -89,7 +89,13 @@
     "firebase-admin": "^13.10.0",
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.0",
-    "tslib": "^2.3.0"
+    "tslib": "^2.3.0",
+    "@org/types": "workspace:*",
+    "@org/exceptions": "workspace:*",
+    "@org/decorators": "workspace:*",
+    "@org/utils": "workspace:*",
+    "@org/kafka-client": "workspace:*",
+    "@org/prisma-client": "workspace:*"
   },
   "devDependencies": {
     "@nestjs/testing": "^11.0.0"
