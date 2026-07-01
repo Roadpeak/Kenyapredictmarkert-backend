@@ -5,8 +5,18 @@
     "outDir": "dist",
     "tsBuildInfoFile": "dist/tsconfig.lib.tsbuildinfo",
     "emitDeclarationOnly": false,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["src/**/*.ts"],
-  "references": []
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [],
+  "exclude": [
+    "**/*.spec.ts",
+    "**/*.test.ts",
+    "**/jest.config.*",
+    "**/jest.setup.*"
+  ]
 }
