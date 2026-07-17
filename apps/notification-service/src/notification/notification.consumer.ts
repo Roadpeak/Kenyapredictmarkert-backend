@@ -1,12 +1,14 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 import { NotificationService } from './notification.service';
+import { SmsService } from './sms.service';
 import type {
   TradeConfirmedPayload,
   MarketSettledPayload,
   DepositCompletedPayload,
   WithdrawalCompletedPayload,
   WithdrawalFailedPayload,
+  SendSmsPayload,
 } from '@org/types';
 
 @Injectable()
@@ -16,9 +18,21 @@ export class NotificationConsumer implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly kafka: KafkaService,
     private readonly notificationService: NotificationService,
+    private readonly smsService: SmsService,
   ) {}
 
   async onModuleInit() {
+    // Auth-service publishes OTP + password-reset SMS here on register /
+    // request-otp / reset-password. Without this subscription those events
+    // silently vanish and users never get the code.
+    await this.kafka.subscribe<SendSmsPayload>(
+      'notification-sms-group',
+      [KAFKA_TOPICS.NOTIFICATION_SEND_SMS],
+      async (_topic, payload) => {
+        await this.smsService.send(payload.phone, payload.message);
+      },
+    );
+
     await this.kafka.subscribe<TradeConfirmedPayload>(
       'notification-trade-group',
       [KAFKA_TOPICS.TRADING_TRADE_CONFIRMED],
