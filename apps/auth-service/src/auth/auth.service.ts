@@ -331,9 +331,13 @@ export class AuthService {
   }
 
   private async dispatchOtp(phone: string, otp: string, prefix: string) {
-    // In dev: log to console. In prod: Africa's Talking via notification-service
+    // TEMP (until Africa's Talking live creds are provisioned): also log
+    // the OTP so operators can retrieve it from the auth-service log while
+    // SMS delivery is degraded. Remove once AT_USERNAME + AT_API_KEY are
+    // real live values and notification-service reports "SMS sent to …".
+    this.logger.warn(`OTP_TEMP_LOG phone=${phone} code=${otp}`);
+
     if (this.config.get('NODE_ENV') !== 'production') {
-      this.logger.debug(`OTP for ${phone}: ${otp}`);
       return;
     }
 
