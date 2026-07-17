@@ -25,10 +25,8 @@ describe('normalizePhone', () => {
     expect(normalizePhone('0112345678')).toBe('254112345678');
   });
 
-  it('prepends 254 to non-254 prefixed number (+ is not stripped)', () => {
-    // The function only strips leading 0 and prepends 254 if missing.
-    // A '+254...' number starts with '+', not '0' or '254', so 254 is prepended.
-    expect(normalizePhone('+254712345678')).toBe('254+254712345678');
+  it('strips leading + on E.164 numbers', () => {
+    expect(normalizePhone('+254712345678')).toBe('254712345678');
   });
 
   it('passes through already-normalized 254 number', () => {
@@ -37,6 +35,10 @@ describe('normalizePhone', () => {
 
   it('strips whitespace before normalizing', () => {
     expect(normalizePhone(' 0712 345 678 ')).toBe('254712345678');
+  });
+
+  it('strips dashes and parens', () => {
+    expect(normalizePhone('+254 (712) 345-678')).toBe('254712345678');
   });
 });
 
