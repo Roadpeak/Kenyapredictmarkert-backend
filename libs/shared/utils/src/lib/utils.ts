@@ -4,11 +4,15 @@ import { customAlphabet } from 'nanoid';
 // ─── Phone Utils ──────────────────────────────────────────────────────────────
 
 export function normalizePhone(phone: string): string {
-  const cleaned = phone.replace(/\s+/g, '').replace(/^0/, '254');
-  if (!cleaned.startsWith('254')) {
-    return `254${cleaned}`;
-  }
-  return cleaned;
+  // Strip everything that isn't a digit: whitespace, dashes, parens, and
+  // the leading + on E.164-style inputs like "+254712345678". The old
+  // implementation only handled a bare leading 0, so any client sending
+  // +254... (including our own web frontend) got a garbage key like
+  // "254+254712345678" and every login/register lookup 401'd.
+  const digits = phone.replace(/\D/g, '');
+  if (digits.startsWith('0')) return `254${digits.slice(1)}`;
+  if (digits.startsWith('254')) return digits;
+  return `254${digits}`;
 }
 
 export function formatPhoneForDisplay(phone: string): string {
