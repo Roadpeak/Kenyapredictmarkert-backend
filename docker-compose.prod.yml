@@ -185,10 +185,14 @@ services:
 
   # ─── Frontend (Next.js) — image built by the salvatoluis/kpm repo ─────────
   # FRONTEND_IMAGE_TAG is set by the frontend deploy workflow to the commit SHA;
-  # falls back to :latest when the backend deploys standalone. Restart on this
-  # service is scoped to the frontend deploy — backend deploys don't touch it.
+  # falls back to :latest when the backend deploys standalone.
+  # pull_policy: never — this image lives in a GHCR namespace the backend
+  # workflow can't authenticate against (would 403). The frontend repo's
+  # workflow pulls it explicitly before `up -d --no-deps frontend`. Backend
+  # deploys reuse whatever image is already cached locally.
   frontend:
     image: ghcr.io/salvatoluis/kpm:${FRONTEND_IMAGE_TAG:-latest}
+    pull_policy: never
     restart: unless-stopped
     environment:
       NODE_ENV: production
