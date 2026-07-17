@@ -177,18 +177,15 @@ jobs:
             # Log in to GHCR from the droplet so it can pull our private image.
             echo "${GHCR_PULL_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-            # The frontend service is declared with pull_policy: never in
-            # docker-compose.prod.yml — this workflow's GITHUB_TOKEN can't
-            # authenticate against the salvatoluis/kpm GHCR namespace, so we
-            # never try. It's the frontend repo's job to pull that image.
-            # Pull everything else and start the whole stack; the existing
-            # frontend container is reused as-is.
-            docker compose -f docker-compose.prod.yml pull \
-              postgres redis kafka kafka-init nginx \
-              api-gateway auth-service user-service market-service \
-              trading-service wallet-service payment-service \
-              notification-service feed-service admin-service analytics-service
-            docker compose -f docker-compose.prod.yml up -d --remove-orphans
+            # Backend deploys never touch the frontend service — that image
+            # lives in a GHCR namespace this workflow can't authenticate
+            # against, and it's fully owned by the salvatoluis/kpm repo's
+            # own workflow. Enumerate every backend/infra service on pull
+            # and up so the running frontend container is left alone
+            # regardless of compose defaults.
+            BACKEND_SERVICES="postgres redis kafka kafka-init nginx api-gateway auth-service user-service market-service trading-service wallet-service payment-service notification-service feed-service admin-service analytics-service"
+            docker compose -f docker-compose.prod.yml pull $BACKEND_SERVICES
+            docker compose -f docker-compose.prod.yml up -d $BACKEND_SERVICES
 
             # nginx caches upstream DNS resolution failures during the brief
             # window when app containers are being recreated. Restart it so
