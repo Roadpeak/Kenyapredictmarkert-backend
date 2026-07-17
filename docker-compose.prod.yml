@@ -201,12 +201,16 @@ services:
     networks: [app_net]
 
   # ─── Nginx reverse proxy — only ingress ────────────────────────────────────
+  # No depends_on: frontend — the frontend service lives in a GHCR namespace
+  # the backend deploy workflow can't authenticate against, and any implicit
+  # dependency-triggered `up -d` on the frontend would fail. Each workflow
+  # (backend + frontend) restarts nginx explicitly after its own change so
+  # upstream DNS gets re-resolved anyway.
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
       - api-gateway
-      - frontend
     ports:
       - "80:80"
     volumes:
