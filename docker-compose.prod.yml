@@ -183,12 +183,26 @@ services:
       SERVICE: analytics-service
       ANALYTICS_SERVICE_PORT: "3010"
 
+  # ─── Frontend (Next.js) — image built by the salvatoluis/kpm repo ─────────
+  # FRONTEND_IMAGE_TAG is set by the frontend deploy workflow to the commit SHA;
+  # falls back to :latest when the backend deploys standalone. Restart on this
+  # service is scoped to the frontend deploy — backend deploys don't touch it.
+  frontend:
+    image: ghcr.io/salvatoluis/kpm:${FRONTEND_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+    networks: [app_net]
+
   # ─── Nginx reverse proxy — only ingress ────────────────────────────────────
   nginx:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
       - api-gateway
+      - frontend
     ports:
       - "80:80"
     volumes:

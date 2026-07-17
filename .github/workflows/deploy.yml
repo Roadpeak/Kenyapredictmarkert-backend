@@ -177,7 +177,12 @@ jobs:
             # Log in to GHCR from the droplet so it can pull our private image.
             echo "${GHCR_PULL_TOKEN}" | docker login ghcr.io -u "${GHCR_USER}" --password-stdin
 
-            docker compose -f docker-compose.prod.yml pull
+            # --ignore-pull-failures: the frontend image (ghcr.io/salvatoluis/kpm)
+            # lives in a different GHCR namespace we don't have auth for from
+            # this workflow. If it's public + published, it pulls fine. If not,
+            # we soft-fail and up -d starts everything else. The frontend deploy
+            # in the salvatoluis/kpm repo handles its own pull with the right token.
+            docker compose -f docker-compose.prod.yml pull --ignore-pull-failures
             docker compose -f docker-compose.prod.yml up -d --remove-orphans
 
             # nginx caches upstream DNS resolution failures during the brief
