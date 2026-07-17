@@ -27,13 +27,16 @@ export class SmsService {
       return;
     }
 
+    // Africa's Talking requires E.164 (+254…); our DB stores bare 254…
+    // so it can validate the "country calling code" from the leading +.
+    const e164 = phone.startsWith('+') ? phone : `+${phone}`;
     try {
       await this.at.SMS.send({
-        to: [phone],
+        to: [e164],
         message,
         from: this.config.get('AT_SENDER_ID', 'PredictMkt'),
       });
-      this.logger.log(`SMS sent to ${phone}`);
+      this.logger.log(`SMS sent to ${e164}`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`SMS send failed to ${phone}: ${msg}`);
