@@ -33,14 +33,16 @@ export class SmsService {
 
     // Bonga expects bare 254… (no + or leading 0). Our DB already stores
     // in this form, so pass through — but strip any stray + a caller adds.
-    const mobile = phone.replace(/^\+/, '');
+    // Field names: MSISDN + txtMessage (NOT mobile/message — the gateway
+    // returns HTTP 500 with an empty body if the shape is wrong).
+    const msisdn = phone.replace(/^\+/, '');
     const body = {
       apiClientID: this.bongaClientId,
       key: this.bongaApiKey,
       secret: this.bongaApiSecret,
       serviceID: this.bongaServiceId,
-      mobile,
-      message,
+      MSISDN: msisdn,
+      txtMessage: message,
     };
 
     try {
@@ -49,15 +51,24 @@ export class SmsService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        this.logger.error(`Bonga SMS to ${mobile} failed: HTTP ${res.status} ${text.slice(0, 200)}`);
+      const raw = await res.text().catch(() => '');
+      let data: { status?: number; status_message?: string; error?: unknown } = {};
+      try { data = JSON.parse(raw); } catch { /* non-JSON body */ }
+
+      // Bonga returns 200 OK with a JSON body:  {status:222,status_message:"sent"} on success,
+      // {status:666, …} on delivery failure. Treat everything else as unknown.
+      if (data.status === 666) {
+        this.logger.error(`Bonga rejected SMS to ${msisdn}: ${raw.slice(0, 200)}`);
         return;
       }
-      this.logger.log(`SMS sent to ${mobile}`);
+      if (!res.ok) {
+        this.logger.error(`Bonga SMS to ${msisdn} failed: HTTP ${res.status} ${raw.slice(0, 200)}`);
+        return;
+      }
+      this.logger.log(`SMS sent to ${msisdn} (status=${data.status ?? res.status})`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Bonga SMS to ${mobile} threw: ${msg}`);
+      this.logger.error(`Bonga SMS to ${msisdn} threw: ${msg}`);
       // Don't rethrow — notification failures are non-fatal to auth flow
     }
   }
