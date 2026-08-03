@@ -1,4 +1,16 @@
-import { IsString, IsNotEmpty, IsOptional, IsDateString, IsNumber, IsArray, IsIn, Min, Max } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsOptional,
+  IsDateString,
+  IsNumber,
+  IsArray,
+  IsIn,
+  Min,
+  Max,
+  ArrayMinSize,
+  ValidateNested,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 /** Single source of truth for category validation and the categories endpoint. */
@@ -24,7 +36,33 @@ export const CATEGORY_LABELS: Record<string, string> = {
   weather: 'Weather',
 };
 
+/** One runner in a MULTI market — "Messi", "Fighter A", a candidate. */
+export class MarketOptionDto {
+  @IsString() @IsNotEmpty()
+  declare label: string;
+
+  @IsOptional() @IsString()
+  declare imageUrl?: string;
+
+  @IsOptional() @IsNumber() @Min(0)
+  declare seedKes?: number;
+}
+
 export class CreateMarketDto {
+  @IsOptional() @IsIn(['BINARY', 'MULTI'])
+  declare marketType?: 'BINARY' | 'MULTI';
+
+  /**
+   * Required when marketType is MULTI; at least two runners. Ignored for
+   * BINARY markets, which use the YES/NO seed fields below.
+   */
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2, { message: 'A multi-outcome market needs at least 2 options' })
+  @ValidateNested({ each: true })
+  @Type(() => MarketOptionDto)
+  declare options?: MarketOptionDto[];
+
   @IsString() @IsNotEmpty()
   declare title: string;
 
@@ -67,8 +105,13 @@ export class CreateMarketDto {
 }
 
 export class ResolveMarketDto {
-  @IsString() @IsIn(['YES', 'NO'])
-  declare outcome: 'YES' | 'NO';
+  /** Required for BINARY markets. MULTI markets use winningOptionId instead. */
+  @IsOptional() @IsString() @IsIn(['YES', 'NO'])
+  declare outcome?: 'YES' | 'NO';
+
+  /** Required for MULTI markets — the option that won. */
+  @IsOptional() @IsString()
+  declare winningOptionId?: string;
 
   @IsOptional() @IsString()
   declare note?: string;

@@ -424,10 +424,16 @@ export class TradingService {
   // ─── Kafka consumers ──────────────────────────────────────────────────────────
 
   async startKafkaConsumers() {
-    await this.kafka.subscribe<MarketResolvedPayload>(
+    await this.kafka.subscribe<
+      MarketResolvedPayload & { marketType?: 'BINARY' | 'MULTI'; winningOptionId?: string }
+    >(
       'trading-service-resolution-group',
       [KAFKA_TOPICS.MARKET_RESOLVED],
       async (_topic, payload) => {
+        if (payload.marketType === 'MULTI' && payload.winningOptionId) {
+          await this.settleOptionMarket(payload.marketId, payload.winningOptionId);
+          return;
+        }
         await this.settleMarket(payload);
       },
     );
@@ -442,13 +448,27 @@ export class TradingService {
 
     await this.kafka.subscribe<{
       marketId: string;
+      marketType?: 'BINARY' | 'MULTI';
       seedYesKes?: number;
       seedNoKes?: number;
       rake?: number;
+      options?: Array<{ optionId: string; label: string; seedKes: number }>;
     }>(
       'trading-service-activation-group',
       [KAFKA_TOPICS.MARKET_ACTIVATED],
       async (_topic, payload) => {
+        if (payload.marketType === 'MULTI') {
+          await this.initOptionPools(
+            payload.marketId,
+            payload.options ?? [],
+            payload.rake ?? 0.04,
+          );
+          this.logger.log(
+            `Option pools initialised for ${payload.marketId} (${payload.options?.length ?? 0} options)`,
+          );
+          return;
+        }
+
         await this.initMarketPool(
           payload.marketId,
           payload.seedYesKes ?? 1000,
@@ -474,6 +494,270 @@ export class TradingService {
         version: 0,
       },
     });
+  }
+
+  // ─── MULTI markets ────────────────────────────────────────────────────────────
+  //
+  // Pick-a-winner markets ("who wins the Ballon d'Or?") run on their own tables
+  // so the binary YES/NO path — and every settlement rule that depends on it —
+  // is untouched. The maths is the same parimutuel model: an option's price is
+  // its share of the pot, and the winning side splits the whole pot net of rake.
+
+  async initOptionPools(
+    marketId: string,
+    options: Array<{ optionId: string; label: string; seedKes: number }>,
+    rake: number,
+  ) {
+    for (const opt of options) {
+      await this.prisma.optionPool.upsert({
+        where: { optionId: opt.optionId },
+        update: {},
+        create: {
+          marketId,
+          optionId: opt.optionId,
+          label: opt.label,
+          poolKes: opt.seedKes,
+          rake,
+          version: 0,
+        },
+      });
+    }
+  }
+
+  /** Live prices for one MULTI market — each option's share of the pot. */
+  async getOptionPrices(marketId: string) {
+    const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
+    const total = pools.reduce((sum, p) => sum + Number(p.poolKes), 0);
+
+    return pools.map((p) => ({
+      optionId: p.optionId,
+      label: p.label,
+      poolKes: Number(p.poolKes),
+      totalShares: Number(p.totalShares),
+      price: total > 0 ? Number(p.poolKes) / total : 1 / (pools.length || 1),
+    }));
+  }
+
+  async placeOptionTrade(
+    userId: string,
+    dto: { marketId: string; optionId: string; amountKes: number; idempotencyKey: string },
+  ) {
+    const existing = await this.prisma.optionTrade.findUnique({
+      where: { idempotencyKey: dto.idempotencyKey },
+    });
+    if (existing) {
+      if (existing.userId !== userId) {
+        throw new BadRequestException('Idempotency key already used');
+      }
+      return existing;
+    }
+
+    const pool = await this.prisma.optionPool.findUnique({
+      where: { optionId: dto.optionId },
+    });
+    if (!pool || pool.marketId !== dto.marketId) {
+      throw new NotFoundException('Option not found for this market');
+    }
+
+    await this.assertMarketActive(dto.marketId);
+    await this.reserveWalletFunds(userId, dto.amountKes, dto.idempotencyKey);
+
+    try {
+      const trade = await this.executeOptionTrade(userId, dto, Number(pool.rake));
+      await this.confirmWalletDebit(userId, dto.amountKes, trade.id, dto.idempotencyKey);
+
+      await this.kafka.publish(
+        KAFKA_TOPICS.TRADING_TRADE_CONFIRMED,
+        {
+          tradeId: trade.id,
+          userId,
+          marketId: dto.marketId,
+          outcome: trade.label,
+          amountKes: dto.amountKes,
+          sharesReceived: Number(trade.sharesReceived),
+          pricePerShare: Number(trade.pricePerShare),
+        },
+        dto.marketId,
+      );
+
+      await this.kafka.publish(KAFKA_TOPICS.ANALYTICS_TRADE_EVENT, {
+        tradeId: trade.id,
+        userId,
+        marketId: dto.marketId,
+        outcome: trade.label,
+        amountKes: dto.amountKes,
+        pricePerShare: Number(trade.pricePerShare),
+        occurredAt: new Date().toISOString(),
+      });
+
+      return {
+        tradeId: trade.id,
+        marketId: dto.marketId,
+        optionId: dto.optionId,
+        label: trade.label,
+        amountKes: Number(trade.amountKes),
+        sharesReceived: Number(trade.sharesReceived),
+        pricePerShare: Number(trade.pricePerShare),
+        status: trade.status,
+      };
+    } catch (err) {
+      await this.releaseWalletReserve(userId, dto.amountKes, dto.idempotencyKey);
+      throw err;
+    }
+  }
+
+  private async executeOptionTrade(
+    userId: string,
+    dto: { marketId: string; optionId: string; amountKes: number; idempotencyKey: string },
+    rake: number,
+  ) {
+    for (let attempt = 0; attempt < MAX_OPTIMISTIC_LOCK_RETRIES; attempt++) {
+      const pool = await this.prisma.optionPool.findUnique({
+        where: { optionId: dto.optionId },
+      });
+      if (!pool) throw new NotFoundException('Option pool missing');
+
+      const allPools = await this.prisma.optionPool.findMany({
+        where: { marketId: dto.marketId },
+      });
+      const totalPot = allPools.reduce((s, p) => s + Number(p.poolKes), 0);
+      const price =
+        totalPot > 0 ? Number(pool.poolKes) / totalPot : 1 / (allPools.length || 1);
+
+      const shares = dto.amountKes / SHARE_PRICE_KES;
+
+      try {
+        return await this.prisma.$transaction(async (tx) => {
+          const updated = await tx.optionPool.updateMany({
+            where: { optionId: dto.optionId, version: pool.version },
+            data: {
+              poolKes: { increment: dto.amountKes },
+              totalShares: { increment: shares },
+              version: { increment: 1 },
+            },
+          });
+          // Someone else moved the pool between read and write — retry.
+          if (updated.count === 0) throw new ConflictException('retry');
+
+          const trade = await tx.optionTrade.create({
+            data: {
+              userId,
+              marketId: dto.marketId,
+              optionId: dto.optionId,
+              label: pool.label,
+              amountKes: dto.amountKes,
+              sharesReceived: shares,
+              pricePerShare: price,
+              poolAtTrade: Number(pool.poolKes),
+              status: 'CONFIRMED',
+              idempotencyKey: dto.idempotencyKey,
+            },
+          });
+
+          const existingPos = await tx.optionPosition.findUnique({
+            where: { userId_optionId: { userId, optionId: dto.optionId } },
+          });
+
+          if (existingPos) {
+            const newShares = Number(existingPos.totalShares) + shares;
+            const newCost = Number(existingPos.totalCostKes) + dto.amountKes;
+            await tx.optionPosition.update({
+              where: { id: existingPos.id },
+              data: {
+                totalShares: newShares,
+                totalCostKes: newCost,
+                avgPriceKes: newCost / (newShares * SHARE_PRICE_KES),
+              },
+            });
+          } else {
+            await tx.optionPosition.create({
+              data: {
+                userId,
+                marketId: dto.marketId,
+                optionId: dto.optionId,
+                label: pool.label,
+                totalShares: shares,
+                totalCostKes: dto.amountKes,
+                avgPriceKes: price,
+              },
+            });
+          }
+
+          return trade;
+        });
+      } catch (err) {
+        if (err instanceof ConflictException && attempt < MAX_OPTIMISTIC_LOCK_RETRIES - 1) {
+          continue;
+        }
+        throw err;
+      }
+    }
+
+    throw new ConflictException('Market is busy. Please retry your trade.');
+  }
+
+  /**
+   * Settle a MULTI market: the winning option's holders split the entire pot
+   * across all options, net of rake. Losing options' stakes fund the payout,
+   * exactly as the binary path works.
+   */
+  async settleOptionMarket(marketId: string, winningOptionId: string) {
+    const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
+    if (pools.length === 0) return;
+
+    const totalPot = pools.reduce((s, p) => s + Number(p.poolKes), 0);
+    const rake = Number(pools[0].rake);
+
+    const winners = await this.prisma.optionPosition.findMany({
+      where: { marketId, optionId: winningOptionId, isSettled: false },
+    });
+    if (winners.length === 0) {
+      this.logger.warn(`No winning positions for MULTI market ${marketId}`);
+      return;
+    }
+
+    const winningShares = winners.reduce((s, p) => s + Number(p.totalShares), 0);
+    const payoutPerShare = calcPayoutPerShare(totalPot, rake, winningShares);
+    const winningLabel = pools.find((p) => p.optionId === winningOptionId)?.label ?? '';
+
+    const settlements: Array<{ userId: string; payoutKes: number }> = [];
+
+    for (const pos of winners) {
+      const payoutKes = Number(pos.totalShares) * payoutPerShare;
+
+      await this.prisma.optionPosition.update({
+        where: { id: pos.id },
+        data: { isSettled: true, payoutKes },
+      });
+
+      settlements.push({ userId: pos.userId, payoutKes });
+    }
+
+    // Losing positions are settled with a zero payout so they stop showing as open.
+    await this.prisma.optionPosition.updateMany({
+      where: { marketId, optionId: { not: winningOptionId }, isSettled: false },
+      data: { isSettled: true, payoutKes: 0 },
+    });
+
+    // wallet-service credits the payout off this event, same as the binary path.
+    await this.kafka.publishBatch(
+      settlements.map((s) => ({
+        topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
+        key: s.userId,
+        payload: {
+          marketId,
+          marketTitle: marketId,
+          winningOutcome: winningLabel,
+          userId: s.userId,
+          outcome: winningLabel,
+          payoutKes: s.payoutKes,
+        },
+      })),
+    );
+
+    this.logger.log(
+      `MULTI market ${marketId} settled — ${winners.length} winning positions, pot ${totalPot}`,
+    );
   }
 
   // ─── Private helpers ──────────────────────────────────────────────────────────

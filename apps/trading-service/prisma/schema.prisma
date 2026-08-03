@@ -47,6 +47,76 @@ model Trade {
   @@map("trades")
 }
 
+/// Per-option pool for a MULTI market. The binary path keeps using MarketPool
+/// with its poolYes/poolNo columns; these rows are written only for markets
+/// whose type is MULTI, so no existing settlement logic is affected.
+///
+/// `version` drives the same optimistic lock the binary pool uses.
+model OptionPool {
+  id       String @id @default(cuid())
+  marketId String
+  optionId String @unique
+  label    String
+
+  poolKes     Decimal @default(0) @db.Decimal(15, 2)
+  totalShares Decimal @default(0) @db.Decimal(18, 6)
+  rake        Decimal @default(0.04) @db.Decimal(4, 3)
+  version     Int     @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@index([marketId])
+  @@map("option_pools")
+}
+
+/// A user's stake on one option of a MULTI market.
+model OptionPosition {
+  id       String @id @default(cuid())
+  userId   String
+  marketId String
+  optionId String
+  label    String
+
+  totalShares  Decimal  @db.Decimal(18, 6)
+  totalCostKes Decimal  @db.Decimal(15, 2)
+  avgPriceKes  Decimal  @db.Decimal(6, 4)
+  isSettled    Boolean  @default(false)
+  payoutKes    Decimal? @db.Decimal(15, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, optionId])
+  @@index([marketId, isSettled])
+  @@index([userId])
+  @@map("option_positions")
+}
+
+/// A trade against one option of a MULTI market.
+model OptionTrade {
+  id       String @id @default(cuid())
+  userId   String
+  marketId String
+  optionId String
+  label    String
+
+  amountKes      Decimal     @db.Decimal(15, 2)
+  sharesReceived Decimal     @db.Decimal(18, 6)
+  pricePerShare  Decimal     @db.Decimal(6, 4)
+  poolAtTrade    Decimal     @db.Decimal(15, 2)
+  status         TradeStatus @default(PENDING)
+  idempotencyKey String      @unique
+
+  settledAt DateTime?
+  payoutKes Decimal?  @db.Decimal(15, 2)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([marketId, createdAt])
+  @@index([userId, createdAt])
+  @@map("option_trades")
+}
+
 model Position {
   id           String   @id @default(cuid())
   userId       String

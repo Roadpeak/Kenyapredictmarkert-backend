@@ -3,9 +3,27 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import type { AxiosRequestConfig } from 'axios';
-import { IsString, IsNotEmpty, IsNumber, Min, IsOptional, IsIn, IsDateString } from 'class-validator';
+import {
+  IsString,
+  IsNotEmpty,
+  IsNumber,
+  Min,
+  IsOptional,
+  IsIn,
+  IsDateString,
+  IsArray,
+  ArrayMinSize,
+  ValidateNested,
+} from 'class-validator';
+import { Type } from 'class-transformer';
 
 // ─── DTOs ──────────────────────────────────────────────────────────────────────
+
+export class MarketOptionDto {
+  @IsString() @IsNotEmpty() declare label: string;
+  @IsOptional() @IsString() declare imageUrl?: string;
+  @IsOptional() @IsNumber() @Min(0) declare seedKes?: number;
+}
 
 export class CreateMarketDto {
   @IsString() @IsNotEmpty() declare title: string;
@@ -17,10 +35,21 @@ export class CreateMarketDto {
   @IsOptional() @IsNumber() @Min(0) declare seedNoKes?: number;
   @IsOptional() @IsString() declare category?: string;
   @IsOptional() @IsString() declare imageUrl?: string;
+
+  // Pick-a-winner markets ("who wins the Ballon d'Or?") carry their runners
+  // here; BINARY markets omit both and use the YES/NO seeds above.
+  @IsOptional() @IsIn(['BINARY', 'MULTI']) declare marketType?: 'BINARY' | 'MULTI';
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(2, { message: 'A multi-outcome market needs at least 2 options' })
+  @ValidateNested({ each: true })
+  @Type(() => MarketOptionDto)
+  declare options?: MarketOptionDto[];
 }
 
 export class ResolveMarketDto {
-  @IsIn(['YES', 'NO']) declare outcome: 'YES' | 'NO';
+  @IsOptional() @IsIn(['YES', 'NO']) declare outcome?: 'YES' | 'NO';
+  @IsOptional() @IsString() declare winningOptionId?: string;
 }
 
 export class ApproveKycDto {

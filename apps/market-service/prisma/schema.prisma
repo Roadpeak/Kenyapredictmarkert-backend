@@ -45,7 +45,13 @@ model Market {
 
   createdBy String
 
+  // BINARY markets keep the YES/NO columns above and their existing code path
+  // untouched. MULTI markets ("who wins the Ballon d'Or?") carry their runners
+  // in MarketOption instead, each with its own pool.
+  marketType MarketType @default(BINARY)
+
   outcomes      MarketOutcome[]
+  options       MarketOption[]
   feedConfig    FeedConfig?
   priceHistory  PriceSnapshot[]
 
@@ -53,6 +59,29 @@ model Market {
   @@index([closeAt])
   @@index([slug])
   @@map("markets")
+}
+
+/// One runner in a MULTI market — a candidate, fighter or team. `poolKes` is
+/// this option's share of the parimutuel pot; price is poolKes / total across
+/// the market's options, the same formula the binary path uses.
+model MarketOption {
+  id        String  @id @default(cuid())
+  marketId  String
+  label     String
+  imageUrl  String?
+  sortOrder Int     @default(0)
+
+  poolKes    Decimal @default(0) @db.Decimal(15, 2)
+  seedKes    Decimal @default(1000) @db.Decimal(15, 2)
+  totalShares Decimal @default(0) @db.Decimal(18, 6)
+
+  isWinner Boolean @default(false)
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@unique([marketId, label])
+  @@index([marketId])
+  @@map("market_options")
 }
 
 model MarketOutcome {
@@ -101,6 +130,13 @@ enum MarketStatus {
   RESOLVED
   CANCELLED
   DISPUTED
+}
+
+enum MarketType {
+  /// YES/NO — the original path; pools live on Market.poolYesKes/poolNoKes.
+  BINARY
+  /// Pick-a-winner among N runners; pools live on MarketOption.
+  MULTI
 }
 
 enum Outcome {

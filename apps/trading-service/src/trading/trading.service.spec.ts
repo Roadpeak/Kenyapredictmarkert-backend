@@ -23,6 +23,23 @@ const mockPrisma = {
     update: jest.fn(),
     upsert: jest.fn(),
   },
+  optionPool: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    updateMany: jest.fn(),
+    upsert: jest.fn(),
+  },
+  optionPosition: {
+    findUnique: jest.fn(),
+    findMany: jest.fn(),
+    create: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
+  optionTrade: {
+    findUnique: jest.fn(),
+    create: jest.fn(),
+  },
   position: {
     findUnique: jest.fn(),
     findMany: jest.fn(),
@@ -423,6 +440,56 @@ describe('TradingService', () => {
         expect.objectContaining({
           where: { marketId: 'market-1' },
           create: expect.objectContaining({ poolYesKes: 1000, poolNoKes: 1000, rake: 0.04 }),
+        }),
+      );
+    });
+  });
+
+  // ── MULTI markets (pick-a-winner) ───────────────────────────────────────────
+
+  describe('settleOptionMarket', () => {
+    it('pays the whole pot net of rake to the winning option holders', async () => {
+      // Pot is 2000 + 2000 + 1500 = 5500 across three runners, 4% rake.
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'A', poolKes: 2000, rake: 0.04 },
+        { optionId: 'opt-b', label: 'B', poolKes: 2000, rake: 0.04 },
+        { optionId: 'opt-c', label: 'C', poolKes: 1500, rake: 0.04 },
+      ]);
+      // One winner holding every winning share, so they take the full payout.
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        { id: 'pos-1', userId: 'user-1', totalShares: 50 },
+      ]);
+
+      await service.settleOptionMarket('market-1', 'opt-c');
+
+      // calcPayoutPerShare is mocked to 96/share at module scope, so this
+      // asserts the wiring: the whole pot (not just the winning option's
+      // pool) is passed in, and payout = shares * rate.
+      const { calcPayoutPerShare } = jest.requireMock('@org/utils');
+      expect(calcPayoutPerShare).toHaveBeenCalledWith(5500, 0.04, 50);
+      expect(mockPrisma.optionPosition.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'pos-1' },
+          data: { isSettled: true, payoutKes: 50 * 96 },
+        }),
+      );
+    });
+
+    it('settles losing positions with a zero payout', async () => {
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'A', poolKes: 1000, rake: 0.04 },
+        { optionId: 'opt-b', label: 'B', poolKes: 1000, rake: 0.04 },
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        { id: 'pos-1', userId: 'user-1', totalShares: 10 },
+      ]);
+
+      await service.settleOptionMarket('market-1', 'opt-a');
+
+      expect(mockPrisma.optionPosition.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ optionId: { not: 'opt-a' }, isSettled: false }),
+          data: { isSettled: true, payoutKes: 0 },
         }),
       );
     });

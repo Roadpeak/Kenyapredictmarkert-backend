@@ -14,6 +14,21 @@ export class PlaceTradeDto {
   declare idempotencyKey: string;
 }
 
+/** Buy shares in one runner of a MULTI market. */
+export class PlaceOptionTradeDto {
+  @IsString() @IsNotEmpty()
+  declare marketId: string;
+
+  @IsString() @IsNotEmpty()
+  declare optionId: string;
+
+  @IsNumber() @Min(10, { message: 'Minimum trade is KES 10' })
+  declare amountKes: number;
+
+  @IsString() @IsNotEmpty()
+  declare idempotencyKey: string;
+}
+
 export class TradeHistoryQueryDto {
   @IsOptional() @IsNumber()
   declare page?: number;

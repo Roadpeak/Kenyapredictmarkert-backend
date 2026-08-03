@@ -3,7 +3,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { TradingService } from './trading.service';
-import { PlaceTradeDto } from './trading.dto';
+import { PlaceTradeDto, PlaceOptionTradeDto } from './trading.dto';
 import { CurrentUser, Public } from '@org/decorators';
 import type { JwtPayload } from '@org/types';
 
@@ -35,6 +35,25 @@ export class TradingController {
   @ApiOperation({ summary: 'Current open positions' })
   getMyPositions(@CurrentUser() user: JwtPayload) {
     return this.tradingService.getMyPositions(user.sub);
+  }
+
+  // ─── MULTI markets (pick-a-winner) ──────────────────────────────────────────
+
+  @Public()
+  @Get('trades/markets/:marketId/options')
+  @ApiOperation({ summary: 'Live option prices for a multi-outcome market' })
+  getOptionPrices(@Param('marketId') marketId: string) {
+    return this.tradingService.getOptionPrices(marketId);
+  }
+
+  @Post('trades/options')
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Buy shares in one option of a multi-outcome market' })
+  placeOptionTrade(
+    @CurrentUser() user: JwtPayload,
+    @Body() dto: PlaceOptionTradeDto,
+  ) {
+    return this.tradingService.placeOptionTrade(user.sub, dto);
   }
 
   @Get('trades/me/positions/:marketId')

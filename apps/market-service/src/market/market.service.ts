@@ -89,14 +89,30 @@ export class MarketService {
   async getMarket(idOrSlug: string) {
     const market = await this.prisma.market.findFirst({
       where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
-      include: { outcomes: true, feedConfig: true },
+      include: {
+        outcomes: true,
+        feedConfig: true,
+        options: { orderBy: { sortOrder: 'asc' } },
+      },
     });
     if (!market) throw new NotFoundException(`Market not found: ${idOrSlug}`);
+
+    // Parimutuel price for a MULTI option is its share of the total pot —
+    // the same formula the binary path uses, generalised to N runners.
+    // BINARY markets have no options, so this collapses to an empty list.
+    const options = market.options ?? [];
+    const optionsTotal = options.reduce((sum, o) => sum + Number(o.poolKes), 0);
 
     return this.toMarketResponse({
       ...market,
       yesPrice: calcYesPrice(Number(market.poolYesKes), Number(market.poolNoKes)),
       noPrice: calcNoPrice(Number(market.poolYesKes), Number(market.poolNoKes)),
+      options: options.map((o) => ({
+        ...o,
+        poolKes: Number(o.poolKes),
+        totalShares: Number(o.totalShares),
+        price: optionsTotal > 0 ? Number(o.poolKes) / optionsTotal : 1 / (options.length || 1),
+      })),
     });
   }
 
@@ -135,6 +151,19 @@ export class MarketService {
 
   async createMarket(dto: CreateMarketDto, adminId: string) {
     const slug = this.generateSlug(dto.title);
+    const marketType = dto.marketType ?? 'BINARY';
+
+    if (marketType === 'MULTI') {
+      if (!dto.options || dto.options.length < 2) {
+        throw new BadRequestException(
+          'A multi-outcome market needs at least 2 options',
+        );
+      }
+      const labels = dto.options.map((o) => o.label.trim().toLowerCase());
+      if (new Set(labels).size !== labels.length) {
+        throw new BadRequestException('Option labels must be unique');
+      }
+    }
 
     const market = await this.prisma.market.create({
       data: {
@@ -156,10 +185,24 @@ export class MarketService {
         poolNoKes: dto.seedNoKes ?? 1000,
         createdBy: adminId,
         status: 'DRAFT',
-        outcomes: {
-          create: [{ label: 'YES' }, { label: 'NO' }],
-        },
+        marketType,
+        // BINARY keeps its YES/NO outcome rows; MULTI carries its runners in
+        // MarketOption instead, each seeded with its own starting pool.
+        ...(marketType === 'BINARY'
+          ? { outcomes: { create: [{ label: 'YES' as const }, { label: 'NO' as const }] } }
+          : {
+              options: {
+                create: (dto.options ?? []).map((o, i) => ({
+                  label: o.label.trim(),
+                  imageUrl: o.imageUrl,
+                  sortOrder: i,
+                  seedKes: o.seedKes ?? 1000,
+                  poolKes: o.seedKes ?? 1000,
+                })),
+              },
+            }),
       },
+      include: { options: { orderBy: { sortOrder: 'asc' } } },
     });
 
     await this.kafka.publish(KAFKA_TOPICS.MARKET_CREATED, {
@@ -185,16 +228,27 @@ export class MarketService {
       data: { status: 'ACTIVE' },
     });
 
+    const options = await this.prisma.marketOption.findMany({
+      where: { marketId },
+      orderBy: { sortOrder: 'asc' },
+    });
+
     await this.kafka.publish(KAFKA_TOPICS.MARKET_ACTIVATED, {
       marketId,
       title: market.title,
       category: market.category,
       closeAt: market.closeAt.toISOString(),
-      // trading-service seeds its MarketPool from these on activation — without
+      marketType: market.marketType,
+      // trading-service seeds its pools from these on activation — without
       // them no pool exists and every trade on this market fails.
       seedYesKes: Number(market.seedYesKes),
       seedNoKes: Number(market.seedNoKes),
       rake: Number(market.rake),
+      options: options.map((o) => ({
+        optionId: o.id,
+        label: o.label,
+        seedKes: Number(o.seedKes),
+      })),
     });
 
     return updated;
@@ -225,28 +279,69 @@ export class MarketService {
       throw new BadRequestException(`Cannot resolve market in status: ${market.status}`);
     }
 
+    const isMulti = market.marketType === 'MULTI';
+
+    if (isMulti && !dto.winningOptionId) {
+      throw new BadRequestException(
+        'winningOptionId is required to resolve a multi-outcome market',
+      );
+    }
+    if (!isMulti && !dto.outcome) {
+      throw new BadRequestException('outcome is required to resolve a binary market');
+    }
+
+    let winningLabel = dto.outcome as string | undefined;
+
+    if (isMulti) {
+      const winner = await this.prisma.marketOption.findFirst({
+        where: { id: dto.winningOptionId, marketId },
+      });
+      if (!winner) {
+        throw new BadRequestException('winningOptionId does not belong to this market');
+      }
+      winningLabel = winner.label;
+
+      await this.prisma.marketOption.updateMany({
+        where: { marketId },
+        data: { isWinner: false },
+      });
+      await this.prisma.marketOption.update({
+        where: { id: winner.id },
+        data: { isWinner: true },
+      });
+    }
+
     const updated = await this.prisma.market.update({
       where: { id: marketId },
       data: {
         status: 'RESOLVED',
-        resolvedOutcome: dto.outcome as any,
+        // resolvedOutcome is the binary YES/NO enum; a MULTI winner is recorded
+        // on the MarketOption row instead.
+        resolvedOutcome: isMulti ? null : (dto.outcome as any),
         resolutionNote: dto.note,
         resolvedBy: adminId,
         resolvedAt: new Date(),
       },
     });
 
-    const totalPool = Number(market.poolYesKes) + Number(market.poolNoKes);
+    const options = isMulti
+      ? await this.prisma.marketOption.findMany({ where: { marketId } })
+      : [];
+    const totalPool = isMulti
+      ? options.reduce((s, o) => s + Number(o.poolKes), 0)
+      : Number(market.poolYesKes) + Number(market.poolNoKes);
 
     await this.kafka.publish(KAFKA_TOPICS.MARKET_RESOLVED, {
       marketId,
-      outcome: dto.outcome,
+      marketType: market.marketType,
+      outcome: winningLabel,
+      winningOptionId: dto.winningOptionId,
       totalPoolKes: totalPool,
       rake: Number(market.rake),
       resolvedAt: new Date().toISOString(),
     });
 
-    this.logger.log(`Market resolved: ${marketId} → ${dto.outcome}`);
+    this.logger.log(`Market resolved: ${marketId} → ${winningLabel}`);
     return updated;
   }
 
