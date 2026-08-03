@@ -1,5 +1,7 @@
 import { Controller, Get, Param, Query, ParseIntPipe, DefaultValuePipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { Public, Roles } from '@org/decorators';
+import { Role } from '@org/types';
 import { AnalyticsService } from './analytics.service';
 
 @ApiTags('analytics')
@@ -25,9 +27,22 @@ export class AnalyticsController {
     return this.analyticsService.getLeaderboard(period, category, page, limit);
   }
 
+  // ─── Platform Overview ────────────────────────────────────────────────────
+
+  @Get('overview')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] Platform-wide trading activity summary' })
+  @ApiQuery({ name: 'days', required: false, example: 30, description: 'Window for recent totals and the daily series' })
+  getPlatformOverview(
+    @Query('days', new DefaultValuePipe(30), ParseIntPipe) days: number,
+  ) {
+    return this.analyticsService.getPlatformOverview(days);
+  }
+
   // ─── Market Stats ─────────────────────────────────────────────────────────
 
   @Get('markets/:id/stats')
+  @Public()
   @ApiOperation({ summary: 'Get volume stats for a market across all periods' })
   @ApiParam({ name: 'id', description: 'Market ID' })
   getMarketStats(@Param('id') id: string) {

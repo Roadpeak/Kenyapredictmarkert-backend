@@ -453,6 +453,58 @@ export class PaymentService {
     return this.getPaymentHistory(userId, 'WITHDRAWAL', page, limit);
   }
 
+  /**
+   * Platform-wide payment history for admin review. Unlike getPaymentHistory this
+   * is not scoped to a single user; `type` and `status` are optional filters.
+   */
+  async getAllPayments(
+    filters: { type?: 'DEPOSIT' | 'WITHDRAWAL'; status?: string; userId?: string },
+    page = 1,
+    limit = 20,
+  ) {
+    const skip = (page - 1) * limit;
+    const where = {
+      ...(filters.type ? { type: filters.type } : {}),
+      ...(filters.status ? { status: filters.status as never } : {}),
+      ...(filters.userId ? { userId: filters.userId } : {}),
+    };
+
+    const [data, total, totals] = await Promise.all([
+      this.prisma.payment.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { initiatedAt: 'desc' },
+        select: {
+          id: true, userId: true, type: true, status: true, amountKes: true,
+          mpesaReceiptNumber: true, initiatedAt: true, confirmedAt: true,
+          failureReason: true, phoneNumber: true,
+        },
+      }),
+      this.prisma.payment.count({ where }),
+      this.prisma.payment.groupBy({
+        by: ['type'],
+        where: { ...where, status: 'COMPLETED' as never },
+        _sum: { amountKes: true },
+      }),
+    ]);
+
+    const sumFor = (t: string) =>
+      Number(totals.find((r) => r.type === t)?._sum.amountKes ?? 0);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+      totals: {
+        completedDepositsKes: sumFor('DEPOSIT'),
+        completedWithdrawalsKes: sumFor('WITHDRAWAL'),
+      },
+    };
+  }
+
   // ─── Private helpers ──────────────────────────────────────────────────────────
 
   private async getPaymentHistory(userId: string, type: 'DEPOSIT' | 'WITHDRAWAL', page: number, limit: number) {

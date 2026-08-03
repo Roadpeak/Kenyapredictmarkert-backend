@@ -63,11 +63,21 @@ describe('AdminService', () => {
       const result = await service.createMarket(dto as any, 'admin-token');
 
       expect(result).toEqual(marketData);
+      // closesAt/resolvesAt are the public contract; market-service's own DTO
+      // expects openAt/closeAt/resolveAt, so this boundary maps between them.
       expect(mockHttp.post).toHaveBeenCalledWith(
         expect.stringContaining('/api/admin/markets'),
-        dto,
+        expect.objectContaining({
+          title: dto.title,
+          description: dto.description,
+          closeAt: dto.closesAt,
+          openAt: expect.any(String),
+          seedYesKes: 1000,
+          seedNoKes: 1000,
+        }),
         expect.objectContaining({ headers: expect.objectContaining({ 'x-internal-key': 'test-internal-key', authorization: 'Bearer admin-token' }) }),
       );
+      expect(mockHttp.post.mock.calls[0][1]).not.toHaveProperty('closesAt');
     });
 
     it('throws BadRequestException on downstream error', async () => {

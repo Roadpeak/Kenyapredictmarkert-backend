@@ -35,10 +35,16 @@ export class WalletService {
       balance: Number(wallet.balance),
       reservedBalance: Number(wallet.reservedBalance),
       availableBalance: available,
+      // api.html documents the wire names as *Kes and clients read those; the
+      // unsuffixed names above are kept so existing consumers don't break.
+      balanceKes: Number(wallet.balance),
+      reservedKes: Number(wallet.reservedBalance),
+      availableKes: available,
       lifetimeDeposit: Number(wallet.lifetimeDeposit),
       lifetimeWithdraw: Number(wallet.lifetimeWithdraw),
       lifetimePayout: Number(wallet.lifetimePayout),
       currency: wallet.currency,
+      updatedAt: wallet.updatedAt,
     };
   }
 

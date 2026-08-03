@@ -116,6 +116,8 @@ export interface UserRegisteredPayload {
   userId: string;
   phone: string;
   createdAt: string;
+  /** Captured at signup; seeds the profile's displayName. */
+  displayName?: string;
 }
 
 export interface UserVerifiedPayload {

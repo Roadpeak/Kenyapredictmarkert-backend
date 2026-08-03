@@ -7,7 +7,13 @@
     "emitDeclarationOnly": false,
     "types": [
       "node"
-    ]
+    ],
+    // This lib ships Nest decorators and an injectable guard, so it needs the
+    // legacy decorator semantics + DI metadata the services compile with.
+    // Without emitDecoratorMetadata Nest cannot resolve JwtAuthGuard's
+    // constructor params and it throws at startup.
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
   },
   "include": [
     "src/**/*.ts"

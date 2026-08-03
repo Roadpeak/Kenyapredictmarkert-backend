@@ -31,6 +31,7 @@ export class UserService {
       data: {
         id: payload.userId,
         phone: payload.phone,
+        displayName: payload.displayName ?? null,
         referralCode,
         kycTier: 0,
       },
@@ -41,13 +42,18 @@ export class UserService {
 
   // ─── Get own profile ──────────────────────────────────────────────────────────
 
-  async getMyProfile(userId: string) {
+  /**
+   * `role` is owned by auth-service and is not a column here, but api.html
+   * documents it on this response and clients gate admin UI on it — so it is
+   * carried through from the caller's verified JWT rather than re-fetched.
+   */
+  async getMyProfile(userId: string, role?: string) {
     const profile = await this.prisma.userProfile.findUnique({
       where: { id: userId },
       include: { preference: true },
     });
     if (!profile) throw new NotFoundException('Profile not found');
-    return profile;
+    return { ...profile, role };
   }
 
   // ─── Update own profile ───────────────────────────────────────────────────────

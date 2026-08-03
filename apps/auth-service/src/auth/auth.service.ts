@@ -57,7 +57,7 @@ export class AuthService {
 
     // Send OTP for phone verification
     const otp = await this.createOtp(user.id, OtpPurpose.PHONE_VERIFY);
-    await this.dispatchOtp(phone, otp, 'Your PredictMarket verification code');
+    await this.dispatchOtp(phone, otp, 'Your KenyaPolymarket verification code');
 
     // Notify user-service to create profile
     await this.kafka.publish(KAFKA_TOPICS.AUTH_USER_REGISTERED, {
@@ -65,6 +65,7 @@ export class AuthService {
       phone: user.phone,
       email: user.email,
       createdAt: user.createdAt.toISOString(),
+      displayName: dto.displayName?.trim() || undefined,
     });
 
     this.logger.log(`User registered: ${user.id}`);
@@ -97,7 +98,17 @@ export class AuthService {
     const tokens = await this.issueTokens(user.id, user.phone, user.role as Role);
 
     this.logger.log(`Phone verified: ${user.id}`);
-    return tokens;
+    // Ships the user alongside the tokens, matching /auth/login and api.html —
+    // clients set their auth context straight from this response.
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        kycTier: 0,
+      },
+    };
   }
 
   // ─── Login ───────────────────────────────────────────────────────────────────
@@ -118,7 +129,7 @@ export class AuthService {
     if (!user.isVerified) {
       // Resend OTP silently
       const otp = await this.createOtp(user.id, OtpPurpose.PHONE_VERIFY);
-      await this.dispatchOtp(phone, otp, 'Your PredictMarket verification code');
+      await this.dispatchOtp(phone, otp, 'Your KenyaPolymarket verification code');
       throw new BadRequestException(
         'Phone not verified. A new OTP has been sent to your phone.',
       );
@@ -134,7 +145,17 @@ export class AuthService {
       phone: user.phone,
     });
 
-    return tokens;
+    // Clients branch on role immediately after login (e.g. admin routing), so
+    // the user object ships alongside the tokens as documented in api.html.
+    return {
+      ...tokens,
+      user: {
+        id: user.id,
+        phone: user.phone,
+        role: user.role,
+        kycTier: 0,
+      },
+    };
   }
 
   // ─── Refresh Token ───────────────────────────────────────────────────────────
@@ -198,7 +219,7 @@ export class AuthService {
     }
 
     const otp = await this.createOtp(user.id, purpose);
-    await this.dispatchOtp(phone, otp, 'Your PredictMarket code');
+    await this.dispatchOtp(phone, otp, 'Your KenyaPolymarket code');
 
     return { message: 'OTP sent to your phone' };
   }
@@ -212,7 +233,7 @@ export class AuthService {
     // Always return 200 — don't reveal if phone exists
     if (user) {
       const otp = await this.createOtp(user.id, OtpPurpose.PASSWORD_RESET);
-      await this.dispatchOtp(normalized, otp, 'Your PredictMarket password reset code');
+      await this.dispatchOtp(normalized, otp, 'Your KenyaPolymarket password reset code');
     }
 
     return { message: 'If that number is registered, an OTP has been sent.' };

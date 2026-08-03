@@ -1,6 +1,29 @@
 import { IsString, IsNotEmpty, IsOptional, IsDateString, IsNumber, IsArray, IsIn, Min, Max } from 'class-validator';
 import { Type } from 'class-transformer';
 
+/** Single source of truth for category validation and the categories endpoint. */
+export const MARKET_CATEGORIES = [
+  'politics',
+  'sports',
+  'crypto',
+  'finance',
+  'tech',
+  'kenya-local',
+  'entertainment',
+  'weather',
+] as const;
+
+export const CATEGORY_LABELS: Record<string, string> = {
+  politics: 'Politics',
+  sports: 'Sports',
+  crypto: 'Crypto',
+  finance: 'Finance',
+  tech: 'Tech',
+  'kenya-local': 'Kenya Local',
+  entertainment: 'Entertainment',
+  weather: 'Weather',
+};
+
 export class CreateMarketDto {
   @IsString() @IsNotEmpty()
   declare title: string;
@@ -12,7 +35,7 @@ export class CreateMarketDto {
   declare longDescription?: string;
 
   @IsString() @IsNotEmpty()
-  @IsIn(['politics', 'sports', 'crypto', 'finance', 'tech', 'kenya-local', 'entertainment', 'weather'])
+  @IsIn(MARKET_CATEGORIES)
   declare category: string;
 
   @IsOptional() @IsArray() @IsString({ each: true })

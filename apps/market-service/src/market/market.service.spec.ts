@@ -178,17 +178,20 @@ describe('MarketService', () => {
   // ── getCategories ───────────────────────────────────────────────────────────
 
   describe('getCategories', () => {
-    it('returns category list with counts', async () => {
+    it('returns every valid category with its active count', async () => {
       mockPrisma.market.groupBy.mockResolvedValue([
         { category: 'sports', _count: { id: 5 } },
-        { category: 'forex', _count: { id: 3 } },
+        { category: 'crypto', _count: { id: 3 } },
       ]);
 
       const result = await service.getCategories();
-      expect(result).toEqual([
-        { category: 'sports', count: 5 },
-        { category: 'forex', count: 3 },
-      ]);
+
+      // All categories are returned — not just ones with active markets —
+      // otherwise a category could never be picked for its first market.
+      expect(result).toHaveLength(8);
+      expect(result).toContainEqual({ slug: 'sports', name: 'Sports', activeCount: 5 });
+      expect(result).toContainEqual({ slug: 'crypto', name: 'Crypto', activeCount: 3 });
+      expect(result).toContainEqual({ slug: 'politics', name: 'Politics', activeCount: 0 });
     });
   });
 

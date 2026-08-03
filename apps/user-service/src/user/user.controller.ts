@@ -24,7 +24,7 @@ export class UserController {
   @Get('users/me')
   @ApiOperation({ summary: 'Get own profile' })
   getMyProfile(@CurrentUser() user: JwtPayload) {
-    return this.userService.getMyProfile(user.sub);
+    return this.userService.getMyProfile(user.sub, user.role);
   }
 
   @Put('users/me')

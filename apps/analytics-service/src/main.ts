@@ -10,7 +10,7 @@ async function bootstrap() {
   app.enableCors();
 
   const config = new DocumentBuilder()
-    .setTitle('PredictMarket Analytics')
+    .setTitle('KenyaPolymarket Analytics')
     .setVersion('1.0')
     .addBearerAuth()
     .build();
