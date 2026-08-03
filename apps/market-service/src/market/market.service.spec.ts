@@ -16,6 +16,12 @@ const mockPrisma = {
     count: jest.fn(),
     groupBy: jest.fn(),
   },
+  marketOption: {
+    findMany: jest.fn().mockResolvedValue([]),
+    findFirst: jest.fn(),
+    update: jest.fn(),
+    updateMany: jest.fn(),
+  },
   priceSnapshot: {
     findMany: jest.fn(),
     create: jest.fn(),
