@@ -1,7 +1,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { FeedService } from './feed.service';
-import { CurrentUser } from '@org/decorators';
+import { CurrentUser, Public } from '@org/decorators';
 import type { JwtPayload } from '@org/types';
 
 @ApiTags('feed')
@@ -20,6 +20,9 @@ export class FeedController {
     return this.feedService.getUserFeed(user.sub, +page, +limit);
   }
 
+  // Rendered on the public landing page ("Trending now"), so it must resolve
+  // for logged-out visitors. It takes no user context anyway.
+  @Public()
   @Get('feed/discovery')
   @ApiOperation({ summary: 'Get market discovery feed (active markets by volume)' })
   getDiscoveryFeed(

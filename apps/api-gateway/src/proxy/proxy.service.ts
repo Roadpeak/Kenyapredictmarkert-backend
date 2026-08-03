@@ -32,6 +32,7 @@ export class ProxyService {
       { prefix: '/api/wallet', target: base('WALLET_SERVICE_URL', 3005) },
       { prefix: '/api/payments', target: base('PAYMENT_SERVICE_URL', 3006) },
       { prefix: '/api/notifications', target: base('NOTIFICATION_SERVICE_URL', 3007) },
+      { prefix: '/api/feed', target: base('FEED_SERVICE_URL', 3008) },
       { prefix: '/api/callbacks', target: base('PAYMENT_SERVICE_URL', 3006) },
       // More specific admin prefixes must precede the catch-all '/api/admin',
       // which resolve() matches by first startsWith hit.
