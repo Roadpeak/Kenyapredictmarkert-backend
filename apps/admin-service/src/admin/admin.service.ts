@@ -11,8 +11,10 @@ export class CreateMarketDto {
   @IsString() @IsNotEmpty() declare title: string;
   @IsString() @IsNotEmpty() declare description: string;
   @IsDateString() declare closesAt: string;
-  @IsNumber() @Min(0) declare seedYesKes: number;
-  @IsNumber() @Min(0) declare seedNoKes: number;
+  @IsOptional() @IsDateString() declare resolvesAt?: string;
+  // Optional: market-service defaults these to 1000 each when omitted.
+  @IsOptional() @IsNumber() @Min(0) declare seedYesKes?: number;
+  @IsOptional() @IsNumber() @Min(0) declare seedNoKes?: number;
   @IsOptional() @IsString() declare category?: string;
   @IsOptional() @IsString() declare imageUrl?: string;
 }
@@ -51,7 +53,17 @@ export class AdminService {
   // ─── Market management ────────────────────────────────────────────────────────
 
   async createMarket(dto: CreateMarketDto, token: string) {
-    return this.post(`${this.marketServiceUrl}/api/admin/markets`, dto, token);
+    // The public contract (api.html) uses closesAt/resolvesAt, while
+    // market-service's own DTO expects openAt/closeAt/resolveAt. Map here so
+    // the boundary owns the translation instead of leaking it to clients.
+    const { closesAt, resolvesAt, ...rest } = dto;
+    const payload = {
+      ...rest,
+      openAt: new Date().toISOString(),
+      closeAt: closesAt,
+      ...(resolvesAt ? { resolveAt: resolvesAt } : {}),
+    };
+    return this.post(`${this.marketServiceUrl}/api/admin/markets`, payload, token);
   }
 
   async activateMarket(marketId: string, token: string) {

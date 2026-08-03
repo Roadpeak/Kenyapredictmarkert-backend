@@ -4,6 +4,7 @@ import {
   IsOptional,
   IsEmail,
   MinLength,
+  MaxLength,
   Matches,
 } from 'class-validator';
 
@@ -22,6 +23,11 @@ export class RegisterDto {
   @IsOptional()
   @IsEmail()
   declare email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  declare displayName?: string;
 }
 
 export class VerifyPhoneDto {

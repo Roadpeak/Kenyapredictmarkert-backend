@@ -18,6 +18,7 @@ TOPICS=(
   kmkt.market.resolved
   kmkt.market.cancelled
   kmkt.market.price-updated
+  kmkt.market.pool-updated
 
   # Trading
   kmkt.trading.trade-initiated
@@ -54,14 +55,24 @@ TOPICS=(
 
 echo "Creating Kafka topics on broker: $BROKER"
 
+# Prefer the host CLI when present, otherwise run inside the Kafka container.
+if command -v kafka-topics >/dev/null 2>&1; then
+  kt() { kafka-topics "$@"; }
+else
+  kt() { docker exec "${KAFKA_CONTAINER:-predictmarket-kafka}" kafka-topics "$@"; }
+fi
+
 for topic in "${TOPICS[@]}"; do
-  kafka-topics --bootstrap-server "$BROKER" \
+  if kt --bootstrap-server "$BROKER" \
     --create \
     --if-not-exists \
     --topic "$topic" \
     --partitions "$PARTITIONS" \
-    --replication-factor "$REPLICATION"
-  echo "  Created: $topic"
+    --replication-factor "$REPLICATION" >/dev/null 2>&1; then
+    echo "  Created: $topic"
+  else
+    echo "  FAILED:  $topic" >&2
+  fi
 done
 
 echo "Done. Topics created: ${#TOPICS[@]}"

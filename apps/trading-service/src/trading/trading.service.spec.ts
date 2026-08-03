@@ -45,6 +45,9 @@ const mockKafka = {
 const mockHttp = { post: jest.fn(), get: jest.fn() };
 const mockConfig = {
   get: jest.fn((key: string, def?: string) => def ?? 'http://localhost:3005'),
+  getOrThrow: jest.fn((key: string) =>
+    key === 'INTERNAL_API_KEY' ? 'test-internal-key' : 'http://localhost:3005',
+  ),
 };
 
 jest.mock('@org/utils', () => ({
@@ -205,7 +208,23 @@ describe('TradingService', () => {
       expect(mockHttp.post).toHaveBeenCalledWith(
         expect.stringContaining('/internal/wallet/reserve'),
         expect.objectContaining({ userId: 'user-1', amount: 100 }),
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'x-internal-key': 'test-internal-key' }),
+        }),
       );
+    });
+
+    it('releases the reserve after debiting so funds are not left locked', async () => {
+      await service.placeTrade('user-1', dto as any);
+
+      const endpoints = mockHttp.post.mock.calls.map((c: unknown[]) => String(c[0]));
+      const debitIdx = endpoints.findIndex((u) => u.includes('/internal/wallet/debit'));
+      const releaseIdx = endpoints.findIndex((u) => u.includes('/internal/wallet/release'));
+
+      // debit only moves `balance` — without the release the reserved amount
+      // stays on the wallet forever and permanently locks the funds.
+      expect(debitIdx).toBeGreaterThanOrEqual(0);
+      expect(releaseIdx).toBeGreaterThan(debitIdx);
     });
   });
 

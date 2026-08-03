@@ -33,6 +33,11 @@ export class ProxyService {
       { prefix: '/api/payments', target: base('PAYMENT_SERVICE_URL', 3006) },
       { prefix: '/api/notifications', target: base('NOTIFICATION_SERVICE_URL', 3007) },
       { prefix: '/api/callbacks', target: base('PAYMENT_SERVICE_URL', 3006) },
+      // More specific admin prefixes must precede the catch-all '/api/admin',
+      // which resolve() matches by first startsWith hit.
+      { prefix: '/api/admin/payments', target: base('PAYMENT_SERVICE_URL', 3006) },
+      { prefix: '/api/admin', target: base('ADMIN_SERVICE_URL', 3009) },
+      { prefix: '/api/analytics', target: base('ANALYTICS_SERVICE_URL', 3010) },
     ];
 
     this.internalApiKey = config.get('INTERNAL_API_KEY', 'changeme');

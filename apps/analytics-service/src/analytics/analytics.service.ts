@@ -147,25 +147,126 @@ export class AnalyticsService implements OnModuleInit {
 
   // ─── Market Stats ──────────────────────────────────────────────────────────
 
-  async getMarketStats(marketId: string): Promise<
-    Array<{
-      period: string;
-      volumeKes: number;
-      tradeCount: number;
-      computedAt: Date;
-    }>
-  > {
-    const volumes = await this.prisma.marketVolume.findMany({
-      where: { marketId },
-      orderBy: { period: 'asc' },
-    });
+  /**
+   * Per-market summary in the shape api.html documents. Computed from
+   * TradeEvent rather than the MarketVolume rollup — the rollup only exists
+   * after the cron has run, so a freshly traded market would report zeros.
+   */
+  async getMarketStats(marketId: string): Promise<{
+    marketId: string;
+    dailyVolume: number;
+    weeklyVolume: number;
+    totalVolume: number;
+    uniqueTraders: number;
+    tradeCount: number;
+  }> {
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-    return volumes.map((v) => ({
-      period: v.period,
-      volumeKes: Number(v.volumeKes),
-      tradeCount: v.tradeCount,
-      computedAt: v.computedAt,
-    }));
+    const [total, daily, weekly, traders] = await Promise.all([
+      this.prisma.tradeEvent.aggregate({
+        where: { marketId },
+        _sum: { amountKes: true },
+        _count: { _all: true },
+      }),
+      this.prisma.tradeEvent.aggregate({
+        where: { marketId, occurredAt: { gte: dayAgo } },
+        _sum: { amountKes: true },
+      }),
+      this.prisma.tradeEvent.aggregate({
+        where: { marketId, occurredAt: { gte: weekAgo } },
+        _sum: { amountKes: true },
+      }),
+      this.prisma.tradeEvent.findMany({
+        where: { marketId },
+        distinct: ['userId'],
+        select: { userId: true },
+      }),
+    ]);
+
+    return {
+      marketId,
+      dailyVolume: Number(daily._sum.amountKes ?? 0),
+      weeklyVolume: Number(weekly._sum.amountKes ?? 0),
+      totalVolume: Number(total._sum.amountKes ?? 0),
+      uniqueTraders: traders.length,
+      tradeCount: total._count._all,
+    };
+  }
+
+  // ─── Platform Overview ─────────────────────────────────────────────────────
+
+  /**
+   * Aggregate platform-wide trading activity for the admin dashboard.
+   * `days` bounds the daily volume series and the "recent" totals; lifetime
+   * figures are unbounded.
+   */
+  async getPlatformOverview(days = 30): Promise<{
+    totalVolumeKes: number;
+    totalTrades: number;
+    uniqueTraders: number;
+    recentVolumeKes: number;
+    recentTrades: number;
+    avgTradeKes: number;
+    dailyVolume: Array<{ date: string; volumeKes: number; tradeCount: number }>;
+    topMarkets: Array<{ marketId: string; volumeKes: number; tradeCount: number }>;
+  }> {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const [lifetime, recent, traders, daily, topMarkets] = await Promise.all([
+      this.prisma.tradeEvent.aggregate({
+        _sum: { amountKes: true },
+        _count: { _all: true },
+      }),
+      this.prisma.tradeEvent.aggregate({
+        where: { occurredAt: { gte: since } },
+        _sum: { amountKes: true },
+        _count: { _all: true },
+      }),
+      this.prisma.tradeEvent.findMany({
+        distinct: ['userId'],
+        select: { userId: true },
+      }),
+      this.prisma.$queryRaw<Array<{ date: Date; volume_kes: string; trade_count: bigint }>>`
+        SELECT date_trunc('day', "occurredAt") AS date,
+               SUM("amountKes") AS volume_kes,
+               COUNT(*) AS trade_count
+        FROM trade_events
+        WHERE "occurredAt" >= ${since}
+        GROUP BY 1
+        ORDER BY 1 ASC
+      `,
+      this.prisma.tradeEvent.groupBy({
+        by: ['marketId'],
+        _sum: { amountKes: true },
+        _count: { _all: true },
+        orderBy: { _sum: { amountKes: 'desc' } },
+        take: 5,
+      }),
+    ]);
+
+    const totalVolumeKes = Number(lifetime._sum.amountKes ?? 0);
+    const totalTrades = lifetime._count._all;
+
+    return {
+      totalVolumeKes,
+      totalTrades,
+      uniqueTraders: traders.length,
+      recentVolumeKes: Number(recent._sum.amountKes ?? 0),
+      recentTrades: recent._count._all,
+      avgTradeKes: totalTrades > 0 ? totalVolumeKes / totalTrades : 0,
+      dailyVolume: daily.map((d) => ({
+        date: d.date.toISOString().slice(0, 10),
+        volumeKes: Number(d.volume_kes),
+        tradeCount: Number(d.trade_count),
+      })),
+      topMarkets: topMarkets.map((m) => ({
+        marketId: m.marketId,
+        volumeKes: Number(m._sum.amountKes ?? 0),
+        tradeCount: m._count._all,
+      })),
+    };
   }
 
   // ─── User Stats ────────────────────────────────────────────────────────────

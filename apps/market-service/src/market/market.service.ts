@@ -2,7 +2,13 @@ import { Injectable, NotFoundException, BadRequestException, Logger } from '@nes
 import { PrismaService } from './prisma.service';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 import { calcYesPrice, calcNoPrice } from '@org/utils';
-import { CreateMarketDto, ResolveMarketDto, MarketQueryDto } from './market.dto';
+import {
+  CreateMarketDto,
+  ResolveMarketDto,
+  MarketQueryDto,
+  MARKET_CATEGORIES,
+  CATEGORY_LABELS,
+} from './market.dto';
 
 @Injectable()
 export class MarketService {
@@ -64,11 +70,13 @@ export class MarketService {
       this.prisma.market.count({ where }),
     ]);
 
-    const marketsWithPrice = markets.map((m) => ({
-      ...m,
-      yesPrice: calcYesPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
-      noPrice: calcNoPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
-    }));
+    const marketsWithPrice = markets.map((m) =>
+      this.toMarketResponse({
+        ...m,
+        yesPrice: calcYesPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
+        noPrice: calcNoPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
+      }),
+    );
 
     return {
       data: marketsWithPrice,
@@ -85,11 +93,11 @@ export class MarketService {
     });
     if (!market) throw new NotFoundException(`Market not found: ${idOrSlug}`);
 
-    return {
+    return this.toMarketResponse({
       ...market,
       yesPrice: calcYesPrice(Number(market.poolYesKes), Number(market.poolNoKes)),
       noPrice: calcNoPrice(Number(market.poolYesKes), Number(market.poolNoKes)),
-    };
+    });
   }
 
   // ─── Price history ────────────────────────────────────────────────────────────
@@ -111,7 +119,16 @@ export class MarketService {
       where: { status: 'ACTIVE' },
       _count: { id: true },
     });
-    return results.map((r) => ({ category: r.category, count: r._count.id }));
+    const counts = new Map(results.map((r) => [r.category, r._count.id]));
+
+    // Every valid category is returned, not just ones that already have active
+    // markets — otherwise admins could never pick a category for its first
+    // market. `slug`/`name`/`activeCount` is the shape clients consume.
+    return MARKET_CATEGORIES.map((slug) => ({
+      slug,
+      name: CATEGORY_LABELS[slug] ?? slug,
+      activeCount: counts.get(slug) ?? 0,
+    }));
   }
 
   // ─── Admin: Create market ─────────────────────────────────────────────────────
@@ -173,6 +190,11 @@ export class MarketService {
       title: market.title,
       category: market.category,
       closeAt: market.closeAt.toISOString(),
+      // trading-service seeds its MarketPool from these on activation — without
+      // them no pool exists and every trade on this market fails.
+      seedYesKes: Number(market.seedYesKes),
+      seedNoKes: Number(market.seedNoKes),
+      rake: Number(market.rake),
     });
 
     return updated;
@@ -251,6 +273,32 @@ export class MarketService {
 
   // ─── Called by trading-service after each trade ───────────────────────────────
 
+  /**
+   * trading-service owns the pool during a trade and publishes the result here.
+   * Without this subscription the market row keeps its seed pools forever and
+   * totalVolume / tradeCount / price history all stay at zero.
+   */
+  async startKafkaConsumers() {
+    await this.kafka.subscribe<{
+      marketId: string;
+      poolYesKes: number;
+      poolNoKes: number;
+      volumeDelta: number;
+    }>(
+      'market-service-price-updated-group',
+      [KAFKA_TOPICS.MARKET_PRICE_UPDATED],
+      async (_topic, payload) => {
+        await this.updatePoolStats(
+          payload.marketId,
+          payload.poolYesKes,
+          payload.poolNoKes,
+          payload.volumeDelta,
+        );
+      },
+    );
+    this.logger.log('Market Kafka consumers registered');
+  }
+
   async updatePoolStats(
     marketId: string,
     poolYesKes: number,
@@ -281,6 +329,21 @@ export class MarketService {
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+  /**
+   * The Prisma columns are openAt/closeAt/resolveAt, but api.html documents the
+   * wire shape as closesAt/resolvesAt and clients read those names. Both are
+   * emitted so existing consumers of the column names keep working.
+   */
+  private toMarketResponse<T extends { closeAt?: Date | null; resolveAt?: Date | null }>(
+    market: T,
+  ): T & { closesAt?: string | null; resolvesAt?: string | null } {
+    return {
+      ...market,
+      closesAt: market.closeAt ? new Date(market.closeAt).toISOString() : null,
+      resolvesAt: market.resolveAt ? new Date(market.resolveAt).toISOString() : null,
+    };
+  }
 
   private async findMarketOrThrow(id: string) {
     const market = await this.prisma.market.findUnique({ where: { id } });

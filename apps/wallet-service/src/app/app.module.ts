@@ -1,14 +1,17 @@
 import { Module, OnModuleInit } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { WalletController } from '../wallet/wallet.controller';
 import { WalletService } from '../wallet/wallet.service';
 import { PrismaService } from '../wallet/prisma.service';
 import { KafkaService } from '@org/kafka-client';
+import { JwtAuthGuard } from '@org/decorators';
 
 @Module({
   imports: [ConfigModule.forRoot({ isGlobal: true })],
   controllers: [WalletController],
   providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
     WalletService,
     PrismaService,
     {

@@ -29,6 +29,10 @@ describe('normalizePhone', () => {
     expect(normalizePhone('+254712345678')).toBe('254712345678');
   });
 
+  it('prepends 254 to a bare subscriber number', () => {
+    expect(normalizePhone('712345678')).toBe('254712345678');
+  });
+
   it('passes through already-normalized 254 number', () => {
     expect(normalizePhone('254712345678')).toBe('254712345678');
   });

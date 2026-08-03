@@ -8,6 +8,9 @@ import { KafkaService } from '@org/kafka-client';
 const mockPrisma = {
   tradeEvent: {
     upsert: jest.fn(),
+    aggregate: jest.fn(),
+    findMany: jest.fn(),
+    groupBy: jest.fn(),
   },
   leaderboardEntry: {
     findMany: jest.fn(),
@@ -136,25 +139,45 @@ describe('AnalyticsService', () => {
   // ── getMarketStats ──────────────────────────────────────────────────────────
 
   describe('getMarketStats', () => {
-    it('returns volume and trade count for a market', async () => {
-      mockPrisma.marketVolume.findMany.mockResolvedValue([
-        { period: '2026-W23', volumeKes: 50000, tradeCount: 150, computedAt: new Date() },
+    // Shape follows api.html: a single summary object, not a period array.
+    // Computed from TradeEvent so a freshly traded market reports real numbers
+    // instead of zeros until the MarketVolume rollup cron has run.
+    it('summarises volume, trade count and unique traders', async () => {
+      mockPrisma.tradeEvent.aggregate
+        .mockResolvedValueOnce({ _sum: { amountKes: 50000 }, _count: { _all: 150 } })
+        .mockResolvedValueOnce({ _sum: { amountKes: 1200 } })
+        .mockResolvedValueOnce({ _sum: { amountKes: 9000 } });
+      mockPrisma.tradeEvent.findMany.mockResolvedValue([
+        { userId: 'u1' },
+        { userId: 'u2' },
       ]);
 
       const result = await service.getMarketStats('market-1');
 
-      expect(result).toHaveLength(1);
-      expect(result[0]).toMatchObject({
-        period: '2026-W23',
-        volumeKes: 50000,
+      expect(result).toEqual({
+        marketId: 'market-1',
+        dailyVolume: 1200,
+        weeklyVolume: 9000,
+        totalVolume: 50000,
+        uniqueTraders: 2,
         tradeCount: 150,
       });
     });
 
-    it('returns empty array when no volumes recorded', async () => {
-      mockPrisma.marketVolume.findMany.mockResolvedValue([]);
+    it('reports zeros for a market with no trades', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({
+        _sum: { amountKes: null },
+        _count: { _all: 0 },
+      });
+      mockPrisma.tradeEvent.findMany.mockResolvedValue([]);
+
       const result = await service.getMarketStats('market-1');
-      expect(result).toEqual([]);
+
+      expect(result).toMatchObject({
+        totalVolume: 0,
+        uniqueTraders: 0,
+        tradeCount: 0,
+      });
     });
   });
 

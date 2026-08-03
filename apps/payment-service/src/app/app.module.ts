@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
 import { RedisModule } from '@nestjs-modules/ioredis';
@@ -7,6 +8,7 @@ import { PaymentService } from '../payment/payment.service';
 import { PrismaService } from '../payment/prisma.service';
 import { MpesaService } from '../mpesa/mpesa.service';
 import { KafkaService } from '@org/kafka-client';
+import { JwtAuthGuard } from '@org/decorators';
 
 @Module({
   imports: [
@@ -26,6 +28,7 @@ import { KafkaService } from '@org/kafka-client';
   ],
   controllers: [PaymentController],
   providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
     PaymentService,
     PrismaService,
     MpesaService,

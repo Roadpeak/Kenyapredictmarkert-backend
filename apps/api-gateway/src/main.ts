@@ -11,7 +11,7 @@ async function bootstrap() {
 
   // Swagger
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('PredictMarket API')
+    .setTitle('KenyaPolymarket API')
     .setDescription('Kenyan prediction market platform')
     .setVersion('1.0')
     .addBearerAuth()

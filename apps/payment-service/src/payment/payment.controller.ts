@@ -4,8 +4,9 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { InitiateDepositDto, InitiateWithdrawalDto } from './payment.dto';
-import { CurrentUser, Public } from '@org/decorators';
+import { CurrentUser, Public, Roles } from '@org/decorators';
 import type { JwtPayload } from '@org/types';
+import { Role } from '@org/types';
 import type { StkCallback, B2cResult, B2cTimeout } from '../mpesa/mpesa.types';
 
 // Safaricom callback IPs — add to env for easy updates
@@ -47,6 +48,22 @@ export class PaymentController {
     @Query('limit') limit = 20,
   ) {
     return this.paymentService.getDepositHistory(user.sub, +page, +limit);
+  }
+
+  // ─── Admin ────────────────────────────────────────────────────────────────────
+
+  @Get('admin/payments')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] All deposits and withdrawals across the platform' })
+  getAllPayments(
+    @Query('type') type?: 'DEPOSIT' | 'WITHDRAWAL',
+    @Query('status') status?: string,
+    @Query('userId') userId?: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.paymentService.getAllPayments({ type, status, userId }, +page, +limit);
   }
 
   // ─── Withdrawals ──────────────────────────────────────────────────────────────

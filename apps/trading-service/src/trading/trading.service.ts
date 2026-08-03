@@ -234,10 +234,45 @@ export class TradingService {
     });
   }
 
+  /**
+   * The caller's single net position in one market, priced at the live pool.
+   * A user can hold both YES and NO rows; the larger stake is the position
+   * that is surfaced. Returns null when they hold nothing here.
+   *
+   * Field names follow api.html (sharesHeld / costKes / currentValue) rather
+   * than the raw column names, because clients render this directly.
+   */
   async getMarketPosition(userId: string, marketId: string) {
-    return this.prisma.position.findMany({
+    const positions = await this.prisma.position.findMany({
       where: { userId, marketId },
     });
+    if (positions.length === 0) return null;
+
+    const position = positions.reduce((a, b) =>
+      Number(b.totalShares) > Number(a.totalShares) ? b : a,
+    );
+
+    const pool = await this.prisma.marketPool.findUnique({ where: { marketId } });
+    const currentPrice = pool
+      ? position.outcome === 'YES'
+        ? calcYesPrice(Number(pool.poolYesKes), Number(pool.poolNoKes))
+        : calcNoPrice(Number(pool.poolYesKes), Number(pool.poolNoKes))
+      : Number(position.avgPriceKes);
+
+    const sharesHeld = Number(position.totalShares);
+    const costKes = Number(position.totalCostKes);
+    const currentValue = sharesHeld * SHARE_PRICE_KES * currentPrice;
+
+    return {
+      ...position,
+      marketId,
+      outcome: position.outcome,
+      sharesHeld,
+      costKes,
+      currentPrice,
+      currentValue,
+      unrealizedPnl: currentValue - costKes,
+    };
   }
 
   async getMyTrades(userId: string, page = 1, limit = 20, marketId?: string) {
@@ -404,6 +439,25 @@ export class TradingService {
         await this.refundMarket(payload);
       },
     );
+
+    await this.kafka.subscribe<{
+      marketId: string;
+      seedYesKes?: number;
+      seedNoKes?: number;
+      rake?: number;
+    }>(
+      'trading-service-activation-group',
+      [KAFKA_TOPICS.MARKET_ACTIVATED],
+      async (_topic, payload) => {
+        await this.initMarketPool(
+          payload.marketId,
+          payload.seedYesKes ?? 1000,
+          payload.seedNoKes ?? 1000,
+          payload.rake ?? 0.04,
+        );
+        this.logger.log(`Market pool initialised for ${payload.marketId}`);
+      },
+    );
   }
 
   // ─── MarketPool bootstrap (called when market is activated) ──────────────────
@@ -443,14 +497,19 @@ export class TradingService {
 
   private async reserveWalletFunds(userId: string, amount: number, referenceId: string) {
     const walletUrl = this.config.get('WALLET_SERVICE_URL', 'http://localhost:3005');
+    const internalKey = this.config.getOrThrow('INTERNAL_API_KEY');
     try {
       await firstValueFrom(
-        this.http.post(`${walletUrl}/api/internal/wallet/reserve`, {
-          userId,
-          amount,
-          referenceId,
-          referenceType: 'TRADE',
-        }),
+        this.http.post(
+          `${walletUrl}/api/internal/wallet/reserve`,
+          {
+            userId,
+            amount,
+            referenceId,
+            referenceType: 'TRADE',
+          },
+          { headers: { 'x-internal-key': internalKey } },
+        ),
       );
     } catch (err: unknown) {
       const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message ?? 'Insufficient balance';
@@ -465,26 +524,40 @@ export class TradingService {
     referenceId: string,
   ) {
     const walletUrl = this.config.get('WALLET_SERVICE_URL', 'http://localhost:3005');
+    const internalKey = this.config.getOrThrow('INTERNAL_API_KEY');
     await firstValueFrom(
-      this.http.post(`${walletUrl}/api/internal/wallet/debit`, {
-        userId,
-        amount,
-        referenceId: tradeId,
-        referenceType: 'TRADE_DEBIT',
-        description: `Trade ${tradeId}`,
-      }),
+      this.http.post(
+        `${walletUrl}/api/internal/wallet/debit`,
+        {
+          userId,
+          amount,
+          referenceId: tradeId,
+          referenceType: 'TRADE_DEBIT',
+          description: `Trade ${tradeId}`,
+        },
+        { headers: { 'x-internal-key': internalKey } },
+      ),
     );
+
+    // debit only moves `balance`; without this the reserve placed before the
+    // trade stays on the wallet forever and permanently locks the funds.
+    await this.releaseWalletReserve(userId, amount, referenceId);
   }
 
   private async releaseWalletReserve(userId: string, amount: number, referenceId: string) {
     const walletUrl = this.config.get('WALLET_SERVICE_URL', 'http://localhost:3005');
+    const internalKey = this.config.getOrThrow('INTERNAL_API_KEY');
     try {
       await firstValueFrom(
-        this.http.post(`${walletUrl}/api/internal/wallet/release`, {
-          userId,
-          amount,
-          referenceId,
-        }),
+        this.http.post(
+          `${walletUrl}/api/internal/wallet/release`,
+          {
+            userId,
+            amount,
+            referenceId,
+          },
+          { headers: { 'x-internal-key': internalKey } },
+        ),
       );
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
