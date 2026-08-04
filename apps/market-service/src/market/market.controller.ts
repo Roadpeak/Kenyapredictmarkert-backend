@@ -41,6 +41,13 @@ export class MarketController {
     return this.marketService.getPriceHistory(id, +hours);
   }
 
+  @Public()
+  @Get('markets/:id/options/history')
+  @ApiOperation({ summary: 'Get per-option price history for a multi-outcome market chart' })
+  getOptionPriceHistory(@Param('id') id: string, @Query('hours') hours = 24) {
+    return this.marketService.getOptionPriceHistory(id, +hours);
+  }
+
   // ─── Admin routes ─────────────────────────────────────────────────────────────
 
   @Post('admin/markets')

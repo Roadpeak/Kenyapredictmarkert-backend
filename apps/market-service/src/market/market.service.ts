@@ -65,18 +65,32 @@ export class MarketService {
           resolveAt: true,
           resolvedOutcome: true,
           createdAt: true,
+          // Without these two, every MULTI market on the list/grid/carousel
+          // is indistinguishable from a BINARY one — marketType is what
+          // every card branches on, and options is what it renders.
+          marketType: true,
+          options: { orderBy: { sortOrder: 'asc' } },
         },
       }),
       this.prisma.market.count({ where }),
     ]);
 
-    const marketsWithPrice = markets.map((m) =>
-      this.toMarketResponse({
+    const marketsWithPrice = markets.map((m) => {
+      const options = m.options ?? [];
+      const optionsTotal = options.reduce((sum, o) => sum + Number(o.poolKes), 0);
+
+      return this.toMarketResponse({
         ...m,
         yesPrice: calcYesPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
         noPrice: calcNoPrice(Number(m.poolYesKes), Number(m.poolNoKes)),
-      }),
-    );
+        options: options.map((o) => ({
+          ...o,
+          poolKes: Number(o.poolKes),
+          totalShares: Number(o.totalShares),
+          price: optionsTotal > 0 ? Number(o.poolKes) / optionsTotal : 1 / (options.length || 1),
+        })),
+      });
+    });
 
     return {
       data: marketsWithPrice,
@@ -125,6 +139,37 @@ export class MarketService {
       orderBy: { snapshotAt: 'asc' },
       select: { yesPrice: true, noPrice: true, volume: true, snapshotAt: true },
     });
+  }
+
+  /**
+   * Per-option price history for a MULTI market's chart — one series per
+   * option, each option's own line. Labels come from the current
+   * MarketOption rows (a label is effectively immutable once set) rather
+   * than being duplicated onto every snapshot row.
+   */
+  async getOptionPriceHistory(marketId: string, hours = 24) {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+    const [options, snapshots] = await Promise.all([
+      this.prisma.marketOption.findMany({ where: { marketId }, orderBy: { sortOrder: 'asc' } }),
+      this.prisma.optionPriceSnapshot.findMany({
+        where: { marketId, snapshotAt: { gte: since } },
+        orderBy: { snapshotAt: 'asc' },
+        select: { optionId: true, price: true, snapshotAt: true },
+      }),
+    ]);
+
+    const byOption = new Map<string, { price: number; snapshotAt: Date }[]>();
+    for (const s of snapshots) {
+      const list = byOption.get(s.optionId) ?? [];
+      list.push({ price: Number(s.price), snapshotAt: s.snapshotAt });
+      byOption.set(s.optionId, list);
+    }
+
+    return options.map((o) => ({
+      optionId: o.id,
+      label: o.label,
+      points: byOption.get(o.id) ?? [],
+    }));
   }
 
   // ─── Categories ───────────────────────────────────────────────────────────────
@@ -391,6 +436,18 @@ export class MarketService {
         );
       },
     );
+
+    await this.kafka.subscribe<{
+      marketId: string;
+      options: Array<{ optionId: string; poolKes: number; totalShares: number }>;
+      volumeDelta: number;
+    }>(
+      'market-service-option-price-updated-group',
+      [KAFKA_TOPICS.MARKET_OPTION_PRICE_UPDATED],
+      async (_topic, payload) => {
+        await this.updateOptionPoolStats(payload.marketId, payload.options, payload.volumeDelta);
+      },
+    );
     this.logger.log('Market Kafka consumers registered');
   }
 
@@ -421,6 +478,41 @@ export class MarketService {
     });
 
     return market;
+  }
+
+  /**
+   * MULTI-market equivalent of updatePoolStats — trading-service owns each
+   * option's live pool, this just mirrors it into market-service's copy
+   * (what GET /markets/:id actually serves) and snapshots every option's
+   * price for the history chart.
+   */
+  async updateOptionPoolStats(
+    marketId: string,
+    options: Array<{ optionId: string; poolKes: number; totalShares: number }>,
+    volumeDelta: number,
+  ) {
+    const total = options.reduce((sum, o) => sum + o.poolKes, 0);
+
+    await this.prisma.$transaction([
+      ...options.map((o) =>
+        this.prisma.marketOption.update({
+          where: { id: o.optionId },
+          data: { poolKes: o.poolKes, totalShares: o.totalShares },
+        }),
+      ),
+      this.prisma.market.update({
+        where: { id: marketId },
+        data: { totalVolume: { increment: volumeDelta }, tradeCount: { increment: 1 } },
+      }),
+      this.prisma.optionPriceSnapshot.createMany({
+        data: options.map((o) => ({
+          marketId,
+          optionId: o.optionId,
+          price: total > 0 ? o.poolKes / total : 1 / (options.length || 1),
+          poolKes: o.poolKes,
+        })),
+      }),
+    ]);
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -26,6 +26,11 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
   },
+  optionPriceSnapshot: {
+    findMany: jest.fn(),
+    createMany: jest.fn(),
+  },
+  $transaction: jest.fn((ops: any[]) => Promise.all(ops)),
 };
 
 const mockKafka = { publish: jest.fn().mockResolvedValue(undefined) };
@@ -103,6 +108,26 @@ describe('MarketService', () => {
       expect(result.data[0]).toHaveProperty('noPrice');
     });
 
+    it('includes marketType and priced options for a MULTI market — without these a card cannot tell it apart from BINARY', async () => {
+      mockPrisma.market.findMany.mockResolvedValue([
+        makeMarket({
+          marketType: 'MULTI',
+          options: [
+            { id: 'opt-a', label: 'A', imageUrl: null, sortOrder: 0, poolKes: 300, totalShares: 30, isWinner: false },
+            { id: 'opt-b', label: 'B', imageUrl: null, sortOrder: 1, poolKes: 100, totalShares: 0, isWinner: false },
+          ],
+        }),
+      ]);
+      mockPrisma.market.count.mockResolvedValue(1);
+
+      const result = await service.listMarkets({});
+      expect(result.data[0].marketType).toBe('MULTI');
+      expect(result.data[0].options).toEqual([
+        expect.objectContaining({ id: 'opt-a', price: 0.75 }),
+        expect.objectContaining({ id: 'opt-b', price: 0.25 }),
+      ]);
+    });
+
     it('defaults to ACTIVE markets when no status filter', async () => {
       mockPrisma.market.findMany.mockResolvedValue([]);
       mockPrisma.market.count.mockResolvedValue(0);
@@ -178,6 +203,70 @@ describe('MarketService', () => {
       expect(mockPrisma.priceSnapshot.findMany).toHaveBeenCalledWith(
         expect.objectContaining({ where: expect.objectContaining({ marketId: 'market-1' }) }),
       );
+    });
+  });
+
+  // ── getOptionPriceHistory ───────────────────────────────────────────────────
+
+  describe('getOptionPriceHistory', () => {
+    it('groups snapshots by option and labels each series from MarketOption', async () => {
+      mockPrisma.marketOption.findMany.mockResolvedValue([
+        { id: 'opt-a', label: 'A', sortOrder: 0 },
+        { id: 'opt-b', label: 'B', sortOrder: 1 },
+      ]);
+      mockPrisma.optionPriceSnapshot.findMany.mockResolvedValue([
+        { optionId: 'opt-a', price: 0.3, snapshotAt: new Date('2026-01-01T00:00:00Z') },
+        { optionId: 'opt-a', price: 0.4, snapshotAt: new Date('2026-01-01T01:00:00Z') },
+        { optionId: 'opt-b', price: 0.7, snapshotAt: new Date('2026-01-01T00:00:00Z') },
+      ]);
+
+      const result = await service.getOptionPriceHistory('market-1', 24);
+      expect(result).toEqual([
+        { optionId: 'opt-a', label: 'A', points: [{ price: 0.3, snapshotAt: expect.any(Date) }, { price: 0.4, snapshotAt: expect.any(Date) }] },
+        { optionId: 'opt-b', label: 'B', points: [{ price: 0.7, snapshotAt: expect.any(Date) }] },
+      ]);
+    });
+
+    it('returns an empty points array for an option with no trades yet', async () => {
+      mockPrisma.marketOption.findMany.mockResolvedValue([{ id: 'opt-a', label: 'A', sortOrder: 0 }]);
+      mockPrisma.optionPriceSnapshot.findMany.mockResolvedValue([]);
+
+      const result = await service.getOptionPriceHistory('market-1', 24);
+      expect(result).toEqual([{ optionId: 'opt-a', label: 'A', points: [] }]);
+    });
+  });
+
+  // ── updateOptionPoolStats ───────────────────────────────────────────────────
+
+  describe('updateOptionPoolStats', () => {
+    it('mirrors each option pool, bumps market volume, and snapshots every option', async () => {
+      await service.updateOptionPoolStats(
+        'market-1',
+        [
+          { optionId: 'opt-a', poolKes: 300, totalShares: 30 },
+          { optionId: 'opt-b', poolKes: 100, totalShares: 0 },
+        ],
+        200,
+      );
+
+      expect(mockPrisma.marketOption.update).toHaveBeenCalledWith({
+        where: { id: 'opt-a' },
+        data: { poolKes: 300, totalShares: 30 },
+      });
+      expect(mockPrisma.marketOption.update).toHaveBeenCalledWith({
+        where: { id: 'opt-b' },
+        data: { poolKes: 100, totalShares: 0 },
+      });
+      expect(mockPrisma.market.update).toHaveBeenCalledWith({
+        where: { id: 'market-1' },
+        data: { totalVolume: { increment: 200 }, tradeCount: { increment: 1 } },
+      });
+      expect(mockPrisma.optionPriceSnapshot.createMany).toHaveBeenCalledWith({
+        data: [
+          { marketId: 'market-1', optionId: 'opt-a', price: 0.75, poolKes: 300 },
+          { marketId: 'market-1', optionId: 'opt-b', price: 0.25, poolKes: 100 },
+        ],
+      });
     });
   });
 

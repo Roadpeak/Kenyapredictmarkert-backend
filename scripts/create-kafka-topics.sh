@@ -19,6 +19,7 @@ TOPICS=(
   kmkt.market.cancelled
   kmkt.market.price-updated
   kmkt.market.pool-updated
+  kmkt.market.option-price-updated
 
   # Trading
   kmkt.trading.trade-initiated
