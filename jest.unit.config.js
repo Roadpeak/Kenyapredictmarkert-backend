@@ -44,6 +44,10 @@ module.exports = {
     '^(.*)/lib/utils\\.js$': '$1/lib/utils.ts',
     '^(.*)/lib/kafka-client\\.js$': '$1/lib/kafka-client.ts',
     '^(.*)/lib/decorators\\.js$': '$1/lib/decorators.ts',
+    '^(.*)/lib/jwt-auth\\.guard\\.js$': '$1/lib/jwt-auth.guard.ts',
+    // jwt-auth.guard.ts imports its sibling as './decorators.js' (no /lib/
+    // segment in the specifier, unlike the barrel's re-export above).
+    '^\\./decorators\\.js$': './decorators.ts',
     '^(.*)/lib/exceptions\\.js$': '$1/lib/exceptions.ts',
     // uuid@14 and nanoid@5 are pure ESM — redirect to CJS-compatible shims
     '^uuid$': '<rootDir>/test-utils/uuid-mock.js',

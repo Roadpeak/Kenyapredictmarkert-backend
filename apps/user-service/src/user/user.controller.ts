@@ -6,12 +6,15 @@ import {
   Body,
   Param,
   Query,
+  Headers,
   HttpCode,
   HttpStatus,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UserService } from './user.service';
-import { CurrentUser, Roles } from '@org/decorators';
+import { CurrentUser, Public, Roles } from '@org/decorators';
 import type { JwtPayload } from '@org/types';
 import { Role } from '@org/types';
 
@@ -19,7 +22,10 @@ import { Role } from '@org/types';
 @ApiBearerAuth()
 @Controller()
 export class UserController {
-  constructor(private readonly userService: UserService) {}
+  constructor(
+    private readonly userService: UserService,
+    private readonly config: ConfigService,
+  ) {}
 
   @Get('users/me')
   @ApiOperation({ summary: 'Get own profile' })
@@ -130,5 +136,22 @@ export class UserController {
   @ApiOperation({ summary: '[Admin] Unsuspend user' })
   unsuspendUser(@Param('id') id: string, @CurrentUser() admin: JwtPayload) {
     return this.userService.setUserSuspended(id, false, admin.sub);
+  }
+
+  // ─── Internal endpoints (service-to-service only) ─────────────────────────────
+
+  @Public()
+  @Get('internal/users/:id/kyc-tier')
+  @ApiOperation({ summary: '[Internal] KYC tier lookup — used by auth-service to stamp JWTs' })
+  getKycTierInternal(@Param('id') id: string, @Headers('x-internal-key') key: string) {
+    this.validateInternalKey(key);
+    return this.userService.getKycTierInternal(id).then((kycTier) => ({ kycTier }));
+  }
+
+  private validateInternalKey(key: string) {
+    const expected = this.config.get('INTERNAL_API_KEY');
+    if (!expected || key !== expected) {
+      throw new UnauthorizedException('Invalid internal API key');
+    }
   }
 }

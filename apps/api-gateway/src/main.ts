@@ -9,6 +9,14 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors({ origin: '*', credentials: true });
 
+  // In production this sits behind nginx (see nginx/nginx.conf), which is
+  // the gateway's one hop. Without trust proxy, req.ip resolves to nginx's
+  // address rather than the real client — and this gateway re-stamps
+  // x-forwarded-for with req.ip (see proxy.service.ts) before forwarding to
+  // downstream services, so getting this wrong here breaks their IP checks
+  // too (payment-service's M-Pesa callback allowlist depends on it).
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   // Swagger
   const swaggerConfig = new DocumentBuilder()
     .setTitle('KenyaPolymarket API')

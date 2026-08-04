@@ -1,6 +1,7 @@
 import {
-  Controller, Post, Get, Body, Param, Query, HttpCode, HttpStatus, Ip,
+  Controller, Post, Get, Body, Param, Query, HttpCode, HttpStatus, Ip, ForbiddenException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { PaymentService } from './payment.service';
 import { InitiateDepositDto, InitiateWithdrawalDto } from './payment.dto';
@@ -9,18 +10,31 @@ import type { JwtPayload } from '@org/types';
 import { Role } from '@org/types';
 import type { StkCallback, B2cResult, B2cTimeout } from '../mpesa/mpesa.types';
 
-// Safaricom callback IPs — add to env for easy updates
-const SAFARICOM_IPS = new Set([
+// Safaricom's published callback IPs (Daraja docs, "Whitelisting IPs"), used
+// as the default. Override with MPESA_CALLBACK_IPS (comma-separated) if
+// Safaricom updates the list — that shouldn't need a redeploy.
+const DEFAULT_SAFARICOM_IPS = [
   '196.201.214.200', '196.201.214.206', '196.201.213.114',
   '196.201.214.207', '196.201.214.208', '196.201.213.44',
   '196.201.212.127', '196.201.212.138', '196.201.212.129',
   '196.201.212.136', '196.201.212.74', '196.201.212.69',
-]);
+];
 
 @ApiTags('payments')
 @Controller()
 export class PaymentController {
-  constructor(private readonly paymentService: PaymentService) {}
+  private readonly safaricomIps: Set<string>;
+
+  constructor(
+    private readonly paymentService: PaymentService,
+    private readonly config: ConfigService,
+  ) {
+    const override = this.config.get<string>('MPESA_CALLBACK_IPS');
+    const ips = override
+      ? override.split(',').map((ip) => ip.trim()).filter(Boolean)
+      : DEFAULT_SAFARICOM_IPS;
+    this.safaricomIps = new Set(ips);
+  }
 
   // ─── Deposits ─────────────────────────────────────────────────────────────────
 
@@ -128,8 +142,16 @@ export class PaymentController {
   private validateSafaricomIp(ip: string) {
     // Skip validation in development
     if (process.env.NODE_ENV !== 'production') return;
-    if (!SAFARICOM_IPS.has(ip)) {
-      throw new Error(`Unauthorized callback IP: ${ip}`);
+
+    // Express reports IPv4-mapped IPv6 addresses (::ffff:196.201.214.200) on
+    // some socket configurations — strip the prefix so the Set comparison
+    // isn't silently always-false.
+    const normalized = ip.replace(/^::ffff:/, '');
+
+    if (!this.safaricomIps.has(normalized)) {
+      // A plain Error here would surface as a 500; this is a rejected caller,
+      // not a server fault.
+      throw new ForbiddenException(`Unauthorized callback IP: ${normalized}`);
     }
   }
 }

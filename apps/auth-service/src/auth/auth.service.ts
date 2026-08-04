@@ -7,6 +7,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { PrismaService } from './prisma.service';
@@ -31,6 +33,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly config: ConfigService,
     private readonly kafka: KafkaService,
+    private readonly http: HttpService,
   ) {}
 
   // ─── Register ────────────────────────────────────────────────────────────────
@@ -224,6 +227,18 @@ export class AuthService {
     return { message: 'OTP sent to your phone' };
   }
 
+  // ─── Internal: verify OTP (service-to-service) ───────────────────────────────
+
+  /**
+   * Called by payment-service to confirm a withdrawal OTP before initiating
+   * B2C. Reuses the same validateOtp used by phone-verify and password-reset —
+   * one-time use, 5-minute TTL, purpose-scoped.
+   */
+  async verifyOtpInternal(userId: string, code: string, purpose: OtpPurpose) {
+    await this.validateOtp(userId, code, purpose);
+    return { verified: true };
+  }
+
   // ─── Reset Password ──────────────────────────────────────────────────────────
 
   async requestPasswordReset(phone: string) {
@@ -261,6 +276,31 @@ export class AuthService {
   }
 
   // ─── Private Helpers ─────────────────────────────────────────────────────────
+
+  /**
+   * kycTier lives in user-service, not here — looked up on every login/token
+   * refresh so KYC-gated actions (M-Pesa withdrawals) see the current tier
+   * rather than whatever was true when the user first logged in. Falls back
+   * to 0 (unverified) rather than failing login if user-service is briefly
+   * unreachable — a stale tier only ever under-permits, never over-permits.
+   */
+  private async fetchKycTier(userId: string): Promise<number> {
+    const userServiceUrl = this.config.get('USER_SERVICE_URL', 'http://localhost:3002');
+    const internalKey = this.config.get('INTERNAL_API_KEY');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ kycTier: number }>(
+          `${userServiceUrl}/api/internal/users/${userId}/kyc-tier`,
+          { headers: { 'x-internal-key': internalKey }, timeout: 3000 },
+        ),
+      );
+      return response.data.kycTier ?? 0;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`kycTier lookup failed for user ${userId}, defaulting to 0: ${msg}`);
+      return 0;
+    }
+  }
 
   private async findUserByPhoneOrThrow(phone: string) {
     const user = await this.prisma.user.findUnique({ where: { phone } });
@@ -320,13 +360,11 @@ export class AuthService {
     role: Role,
     sessionMeta?: { ipAddress?: string; userAgent?: string },
   ) {
-    // Fetch kycTier from user-service is not available here —
-    // embed 0 at login; will be updated on token refresh after KYC events
     const payload: JwtPayload = {
       sub: userId,
       phone,
       role,
-      kycTier: 0,
+      kycTier: await this.fetchKycTier(userId),
       jti: randomBytes(16).toString('hex'),
     };
 
