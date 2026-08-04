@@ -28,6 +28,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     updateMany: jest.fn(),
     upsert: jest.fn(),
+    count: jest.fn(),
   },
   optionPosition: {
     findUnique: jest.fn(),
@@ -39,6 +40,8 @@ const mockPrisma = {
   optionTrade: {
     findUnique: jest.fn(),
     create: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
   },
   position: {
     findUnique: jest.fn(),
@@ -308,6 +311,67 @@ describe('TradingService', () => {
     });
   });
 
+  // ── getMyOptionTrades ────────────────────────────────────────────────────────
+
+  describe('getMyOptionTrades', () => {
+    it('returns paginated option-trade history', async () => {
+      mockPrisma.optionTrade.findMany.mockResolvedValue([
+        { id: 'otr-1', userId: 'user-1', marketId: 'market-1', optionId: 'opt-a', label: 'A' },
+      ]);
+      mockPrisma.optionTrade.count.mockResolvedValue(1);
+
+      const result = await service.getMyOptionTrades('user-1');
+      expect(result).toMatchObject({ data: expect.any(Array), meta: expect.objectContaining({ total: 1 }) });
+    });
+
+    it('filters by marketId when provided', async () => {
+      mockPrisma.optionTrade.findMany.mockResolvedValue([]);
+      mockPrisma.optionTrade.count.mockResolvedValue(0);
+
+      await service.getMyOptionTrades('user-1', 1, 20, 'market-1');
+      expect(mockPrisma.optionTrade.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: expect.objectContaining({ marketId: 'market-1' }) }),
+      );
+    });
+  });
+
+  // ── getMyOptionPositions ─────────────────────────────────────────────────────
+
+  describe('getMyOptionPositions', () => {
+    it('prices positions across multiple markets using each market\'s own pool total', async () => {
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        {
+          id: 'opos-1', userId: 'user-1', marketId: 'market-1', optionId: 'opt-a', label: 'A',
+          totalShares: 100, totalCostKes: 1000, avgPriceKes: 0.5, isSettled: false,
+        },
+        {
+          id: 'opos-2', userId: 'user-1', marketId: 'market-2', optionId: 'opt-x', label: 'X',
+          totalShares: 50, totalCostKes: 400, avgPriceKes: 0.4, isSettled: false,
+        },
+      ]);
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', marketId: 'market-1', poolKes: 3000 },
+        { optionId: 'opt-b', marketId: 'market-1', poolKes: 1000 },
+        { optionId: 'opt-x', marketId: 'market-2', poolKes: 500 },
+        { optionId: 'opt-y', marketId: 'market-2', poolKes: 500 },
+      ]);
+
+      const result = await service.getMyOptionPositions('user-1');
+      expect(result).toEqual([
+        expect.objectContaining({ marketId: 'market-1', optionId: 'opt-a', currentPrice: 0.75 }),
+        expect.objectContaining({ marketId: 'market-2', optionId: 'opt-x', currentPrice: 0.5 }),
+      ]);
+    });
+
+    it('returns empty array and skips the pool lookup when no open positions', async () => {
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+
+      const result = await service.getMyOptionPositions('user-1');
+      expect(result).toEqual([]);
+      expect(mockPrisma.optionPool.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   // ── getMyPositions ──────────────────────────────────────────────────────────
 
   describe('getMyPositions', () => {
@@ -332,10 +396,75 @@ describe('TradingService', () => {
     });
   });
 
+  // ── getMarketOptionPositions ────────────────────────────────────────────────
+
+  describe('getMarketOptionPositions', () => {
+    const makeOptionPosition = (overrides = {}) => ({
+      id: 'opos-1',
+      userId: 'user-1',
+      marketId: 'market-1',
+      optionId: 'opt-a',
+      label: 'Manchester City',
+      totalShares: 100,
+      totalCostKes: 1000,
+      avgPriceKes: 0.5,
+      isSettled: false,
+      payoutKes: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      ...overrides,
+    });
+
+    it('prices each held option at its live share of the pool', async () => {
+      mockPrisma.optionPosition.findMany.mockResolvedValue([makeOptionPosition()]);
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', poolKes: 3000 },
+        { optionId: 'opt-b', poolKes: 1000 },
+      ]);
+
+      const result = await service.getMarketOptionPositions('user-1', 'market-1');
+      expect(result).toEqual([
+        expect.objectContaining({
+          optionId: 'opt-a',
+          label: 'Manchester City',
+          sharesHeld: 100,
+          costKes: 1000,
+          currentPrice: 0.75,
+          currentValue: 750,
+          unrealizedPnl: -250,
+        }),
+      ]);
+    });
+
+    it('returns one row per option when the user backed more than one runner', async () => {
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        makeOptionPosition({ optionId: 'opt-a', label: 'A' }),
+        makeOptionPosition({ id: 'opos-2', optionId: 'opt-b', label: 'B' }),
+      ]);
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', poolKes: 1000 },
+        { optionId: 'opt-b', poolKes: 1000 },
+      ]);
+
+      const result = await service.getMarketOptionPositions('user-1', 'market-1');
+      expect(result).toHaveLength(2);
+      expect(result.map((r) => r.optionId)).toEqual(['opt-a', 'opt-b']);
+    });
+
+    it('returns empty array when the user holds no options in this market', async () => {
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+
+      const result = await service.getMarketOptionPositions('user-1', 'market-1');
+      expect(result).toEqual([]);
+      expect(mockPrisma.optionPool.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   // ── getMarketTrades ─────────────────────────────────────────────────────────
 
   describe('getMarketTrades', () => {
-    it('returns anonymized public trade list', async () => {
+    it('returns anonymized public trade list for a binary market', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(0);
       mockPrisma.trade.findMany.mockResolvedValue([
         { outcome: 'YES', amountKes: 100, pricePerShare: 0.6, createdAt: new Date() },
       ]);
@@ -343,6 +472,20 @@ describe('TradingService', () => {
 
       const result = await service.getMarketTrades('market-1');
       expect(result.data[0]).not.toHaveProperty('userId');
+      expect(mockPrisma.optionTrade.findMany).not.toHaveBeenCalled();
+    });
+
+    it('returns anonymized option trades for a MULTI market', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(3);
+      mockPrisma.optionTrade.findMany.mockResolvedValue([
+        { label: 'Manchester City', amountKes: 100, pricePerShare: 0.6, createdAt: new Date() },
+      ]);
+      mockPrisma.optionTrade.count.mockResolvedValue(1);
+
+      const result = await service.getMarketTrades('market-1');
+      expect(result.data[0]).toMatchObject({ label: 'Manchester City' });
+      expect(result.data[0]).not.toHaveProperty('userId');
+      expect(mockPrisma.trade.findMany).not.toHaveBeenCalled();
     });
   });
 
