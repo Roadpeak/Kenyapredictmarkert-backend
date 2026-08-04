@@ -12,6 +12,7 @@ import { firstValueFrom } from 'rxjs';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
 import { PrismaService } from './prisma.service';
+import { PrismaClientKnownRequestError } from '../../../../node_modules/.prisma/auth-client';
 import {
   RegisterDto,
   VerifyPhoneDto,
@@ -46,17 +47,40 @@ export class AuthService {
       throw new ConflictException('A user with this phone number already exists');
     }
 
+    if (dto.email) {
+      const existingEmail = await this.prisma.user.findUnique({ where: { email: dto.email } });
+      if (existingEmail) {
+        throw new ConflictException('A user with this email already exists');
+      }
+    }
+
     const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    const user = await this.prisma.user.create({
-      data: {
-        phone,
-        email: dto.email ?? null,
-        passwordHash,
-        isVerified: false,
-        role: Role.USER,
-      },
-    });
+    // The checks above are a fast path for a clean error message — this
+    // catch is the actual safety net for the race between check and create
+    // (two concurrent registrations with the same phone/email).
+    let user;
+    try {
+      user = await this.prisma.user.create({
+        data: {
+          phone,
+          email: dto.email ?? null,
+          passwordHash,
+          isVerified: false,
+          role: Role.USER,
+        },
+      });
+    } catch (err: unknown) {
+      if (err instanceof PrismaClientKnownRequestError && err.code === 'P2002') {
+        const field = (err.meta?.target as string[] | undefined)?.[0];
+        throw new ConflictException(
+          field === 'email'
+            ? 'A user with this email already exists'
+            : 'A user with this phone number already exists',
+        );
+      }
+      throw err;
+    }
 
     // Send OTP for phone verification
     const otp = await this.createOtp(user.id, OtpPurpose.PHONE_VERIFY);

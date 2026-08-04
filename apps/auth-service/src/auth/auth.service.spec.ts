@@ -10,6 +10,7 @@ import { PrismaService } from './prisma.service';
 import { KafkaService } from '@org/kafka-client';
 import * as bcrypt from 'bcryptjs';
 import * as utils from '@org/utils';
+import { PrismaClientKnownRequestError } from '../../../../node_modules/.prisma/auth-client';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -137,6 +138,56 @@ describe('AuthService', () => {
 
     it('throws ConflictException when phone already exists', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(makeUser());
+      await expect(service.register(dto)).rejects.toThrow(ConflictException);
+    });
+
+    it('throws ConflictException when the email is already taken by a different phone', async () => {
+      const withEmail = { ...dto, email: 'taken@example.com' };
+      // First call checks phone (no match), second checks email (match).
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce(makeUser({ phone: '254799999999', email: 'taken@example.com' }));
+
+      await expect(service.register(withEmail)).rejects.toThrow(ConflictException);
+      expect(mockPrisma.user.create).not.toHaveBeenCalled();
+    });
+
+    it('skips the email check entirely when no email is submitted', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockResolvedValue(makeUser());
+      mockPrisma.otpCode.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.otpCode.create.mockResolvedValue(makeOtp());
+
+      await service.register(dto);
+
+      // Only the phone lookup — no findUnique({ where: { email } }) call.
+      expect(mockPrisma.user.findUnique).toHaveBeenCalledTimes(1);
+    });
+
+    it('translates a P2002 unique-constraint violation on email into a 409, not a raw 500', async () => {
+      const withEmail = { ...dto, email: 'race-condition@example.com' };
+      mockPrisma.user.findUnique.mockResolvedValue(null); // both pre-checks pass
+      mockPrisma.user.create.mockRejectedValue(
+        new PrismaClientKnownRequestError('Unique constraint failed on the fields: (`email`)', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['email'] },
+        }),
+      );
+
+      await expect(service.register(withEmail)).rejects.toThrow(ConflictException);
+    });
+
+    it('translates a P2002 unique-constraint violation on phone into a 409 too', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.user.create.mockRejectedValue(
+        new PrismaClientKnownRequestError('Unique constraint failed on the fields: (`phone`)', {
+          code: 'P2002',
+          clientVersion: 'test',
+          meta: { target: ['phone'] },
+        }),
+      );
+
       await expect(service.register(dto)).rejects.toThrow(ConflictException);
     });
 
