@@ -54,6 +54,7 @@ model Market {
   options       MarketOption[]
   feedConfig    FeedConfig?
   priceHistory  PriceSnapshot[]
+  optionPriceHistory OptionPriceSnapshot[]
 
   @@index([status, category])
   @@index([closeAt])
@@ -107,6 +108,24 @@ model PriceSnapshot {
 
   @@index([marketId, snapshotAt])
   @@map("price_snapshots")
+}
+
+/// One option's price at one point in time, for MULTI markets — the
+/// pick-a-winner equivalent of PriceSnapshot. One row per option per trade,
+/// not one row per market, since each option's price moves independently.
+model OptionPriceSnapshot {
+  id         String   @id @default(cuid())
+  marketId   String
+  optionId   String
+  price      Decimal  @db.Decimal(6, 4)
+  poolKes    Decimal  @db.Decimal(15, 2)
+  snapshotAt DateTime @default(now())
+
+  market Market @relation(fields: [marketId], references: [id], onDelete: Cascade)
+
+  @@index([marketId, snapshotAt])
+  @@index([optionId, snapshotAt])
+  @@map("option_price_snapshots")
 }
 
 model FeedConfig {

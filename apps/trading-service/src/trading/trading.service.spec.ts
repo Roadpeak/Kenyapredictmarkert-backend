@@ -289,6 +289,63 @@ describe('TradingService', () => {
     });
   });
 
+  // ── placeOptionTrade — success ──────────────────────────────────────────────
+
+  describe('placeOptionTrade — success path', () => {
+    const dto = { marketId: 'market-1', optionId: 'opt-a', amountKes: 300, idempotencyKey: 'idem-opt-1' };
+
+    const makeOptionTrade = (overrides = {}) => ({
+      id: 'otrade-1',
+      userId: 'user-1',
+      marketId: 'market-1',
+      optionId: 'opt-a',
+      label: 'A',
+      amountKes: 300,
+      sharesReceived: 30,
+      pricePerShare: 0.3333,
+      status: 'CONFIRMED',
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      mockPrisma.optionTrade.findUnique.mockResolvedValue(null); // no duplicate
+      mockPrisma.optionPool.findUnique.mockResolvedValue({
+        optionId: 'opt-a', marketId: 'market-1', label: 'A', poolKes: 100, rake: 0.04, version: 0,
+      });
+      mockHttp.post.mockReturnValue(of(axiosResponse({ success: true }))); // wallet reserve/debit/release
+      mockHttp.get.mockReturnValue(of(axiosResponse({ status: 'ACTIVE', id: 'market-1' })));
+      // executeOptionTrade's transaction — mocked to resolve directly, same
+      // pattern as placeTrade's success-path test above.
+      mockPrisma.$transaction.mockImplementation(async () => makeOptionTrade());
+      // notifyOptionPoolUpdate reads all pools for the market after the trade
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', poolKes: 400, totalShares: 30 },
+        { optionId: 'opt-b', poolKes: 100, totalShares: 0 },
+      ]);
+    });
+
+    it('creates the option trade and returns confirmation', async () => {
+      const result = await service.placeOptionTrade('user-1', dto);
+      expect(result).toMatchObject({ label: 'A', amountKes: 300, sharesReceived: 30, status: 'CONFIRMED' });
+    });
+
+    it('publishes MARKET_OPTION_PRICE_UPDATED with every option in the market, not just the traded one', async () => {
+      await service.placeOptionTrade('user-1', dto);
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('option-price-updated'),
+        expect.objectContaining({
+          marketId: 'market-1',
+          volumeDelta: 300,
+          options: [
+            { optionId: 'opt-a', poolKes: 400, totalShares: 30 },
+            { optionId: 'opt-b', poolKes: 100, totalShares: 0 },
+          ],
+        }),
+        'market-1',
+      );
+    });
+  });
+
   // ── getMyTrades ─────────────────────────────────────────────────────────────
 
   describe('getMyTrades', () => {

@@ -17,6 +17,7 @@ export const KAFKA_TOPICS = {
   MARKET_CANCELLED: 'kmkt.market.cancelled',
   MARKET_PRICE_UPDATED: 'kmkt.market.price-updated',
   MARKET_POOL_UPDATED: 'kmkt.market.pool-updated',
+  MARKET_OPTION_PRICE_UPDATED: 'kmkt.market.option-price-updated',
 
   // Trading
   TRADING_TRADE_INITIATED: 'kmkt.trading.trade-initiated',

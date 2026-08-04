@@ -698,6 +698,10 @@ export class TradingService {
       const trade = await this.executeOptionTrade(userId, dto, Number(pool.rake));
       await this.confirmWalletDebit(userId, dto.amountKes, trade.id, dto.idempotencyKey);
 
+      // market-service's own copy of each option's poolKes/price only moves
+      // when told to — mirrors notifyMarketPoolUpdate's binary equivalent.
+      await this.notifyOptionPoolUpdate(dto.marketId, dto.amountKes);
+
       await this.kafka.publish(
         KAFKA_TOPICS.TRADING_TRADE_CONFIRMED,
         {
@@ -1009,6 +1013,21 @@ export class TradingService {
         poolYesKes: Number(pool.poolYesKes),
         poolNoKes: Number(pool.poolNoKes),
         volumeDelta: Number(trade.amountKes),
+      },
+      marketId,
+    );
+  }
+
+  private async notifyOptionPoolUpdate(marketId: string, volumeDelta: number) {
+    const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
+    if (pools.length === 0) return;
+
+    await this.kafka.publish(
+      KAFKA_TOPICS.MARKET_OPTION_PRICE_UPDATED,
+      {
+        marketId,
+        options: pools.map((p) => ({ optionId: p.optionId, poolKes: Number(p.poolKes), totalShares: Number(p.totalShares) })),
+        volumeDelta,
       },
       marketId,
     );
