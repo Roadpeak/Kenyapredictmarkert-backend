@@ -148,6 +148,15 @@ export class UserController {
     return this.userService.getKycTierInternal(id).then((kycTier) => ({ kycTier }));
   }
 
+  @Public()
+  @Get('internal/users/display-names')
+  @ApiOperation({ summary: '[Internal] Batch display-name lookup — used by analytics-service for the leaderboard' })
+  getDisplayNamesInternal(@Query('ids') ids: string, @Headers('x-internal-key') key: string) {
+    this.validateInternalKey(key);
+    const userIds = (ids ?? '').split(',').filter(Boolean);
+    return this.userService.getDisplayNamesInternal(userIds);
+  }
+
   private validateInternalKey(key: string) {
     const expected = this.config.get('INTERNAL_API_KEY');
     if (!expected || key !== expected) {

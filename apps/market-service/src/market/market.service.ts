@@ -378,6 +378,7 @@ export class MarketService {
 
     await this.kafka.publish(KAFKA_TOPICS.MARKET_RESOLVED, {
       marketId,
+      marketTitle: market.title,
       marketType: market.marketType,
       outcome: winningLabel,
       winningOptionId: dto.winningOptionId,

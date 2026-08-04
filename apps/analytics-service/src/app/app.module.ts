@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
+import { HttpModule } from '@nestjs/axios';
 import { KafkaService } from '@org/kafka-client';
 import { AnalyticsController } from '../analytics/analytics.controller';
 import { AnalyticsService } from '../analytics/analytics.service';
@@ -12,6 +13,7 @@ import { JwtAuthGuard } from '@org/decorators';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
+    HttpModule,
   ],
   controllers: [AnalyticsController],
   providers: [

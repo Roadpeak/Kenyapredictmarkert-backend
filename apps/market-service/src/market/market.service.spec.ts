@@ -388,6 +388,18 @@ describe('MarketService', () => {
       );
     });
 
+    it('includes marketTitle in MARKET_RESOLVED — without it every downstream settlement notification and activity row showed the raw market ID instead of a real title', async () => {
+      mockPrisma.market.findUnique.mockResolvedValue(makeMarket({ status: 'ACTIVE', title: "Who wins the Ballon d'Or?" }));
+      mockPrisma.market.update.mockResolvedValue(makeMarket({ status: 'RESOLVED', resolvedOutcome: 'YES' }));
+
+      await service.resolveMarket('market-1', { outcome: 'YES' } as any, 'admin-1');
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('market.resolved'),
+        expect.objectContaining({ marketTitle: "Who wins the Ballon d'Or?" }),
+      );
+    });
+
     it('resolves CLOSED market with NO outcome', async () => {
       mockPrisma.market.findUnique.mockResolvedValue(makeMarket({ status: 'CLOSED' }));
       mockPrisma.market.update.mockResolvedValue(makeMarket({ status: 'RESOLVED', resolvedOutcome: 'NO' }));

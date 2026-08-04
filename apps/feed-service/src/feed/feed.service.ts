@@ -60,6 +60,9 @@ export class FeedService implements OnModuleInit {
             marketId: payload.marketId,
             outcome: payload.outcome,
             amountKes: payload.amountKes,
+            // The activity page's summary line reads this exact field —
+            // without it, every trade row read "undefined shares".
+            sharesCount: payload.sharesCount,
           },
           occurredAt: new Date(),
         });
@@ -82,6 +85,8 @@ export class FeedService implements OnModuleInit {
           metadata: {
             marketId: payload.marketId,
             payoutKes: payload.payoutKes,
+            outcome: payload.winningOutcome,
+            sharesHeld: payload.sharesHeld,
             won,
           },
           occurredAt: new Date(),
@@ -141,7 +146,22 @@ export class FeedService implements OnModuleInit {
     const feed = userFeeds.get(userId) ?? [];
     const start = (page - 1) * limit;
     const items = feed.slice(start, start + limit);
-    return { items, total: feed.length, page, limit };
+
+    // Shaped to match the frontend's Paginated<ActivityItem> — {data, total}
+    // with {type, marketId, payload, createdAt} per row — not this service's
+    // internal FeedItem shape ({items, metadata, occurredAt}), which the
+    // frontend never actually read.
+    return {
+      data: items.map((item) => ({
+        type: item.type,
+        marketId: typeof item.metadata.marketId === 'string' ? item.metadata.marketId : undefined,
+        payload: { title: item.title, body: item.body, ...item.metadata },
+        createdAt: item.occurredAt.toISOString(),
+      })),
+      total: feed.length,
+      page,
+      limit,
+    };
   }
 
   async getDiscoveryFeed(page: number, limit: number) {

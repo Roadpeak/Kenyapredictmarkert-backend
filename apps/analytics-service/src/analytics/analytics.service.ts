@@ -1,5 +1,8 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { firstValueFrom } from 'rxjs';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 import type { TradeConfirmedPayload, MarketSettledPayload } from '@org/types';
 import { PrismaService } from './prisma.service';
@@ -12,13 +15,6 @@ interface LeaderboardRow {
   trade_count: string | number;
 }
 
-interface UserStatsRow {
-  total_volume_kes: string;
-  total_trades: string | number;
-  total_pnl_kes: string;
-  win_count: string | number;
-}
-
 // ─── Analytics Service ────────────────────────────────────────────────────────
 
 @Injectable()
@@ -28,6 +24,8 @@ export class AnalyticsService implements OnModuleInit {
   constructor(
     private readonly kafka: KafkaService,
     private readonly prisma: PrismaService,
+    private readonly http: HttpService,
+    private readonly config: ConfigService,
   ) {}
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
@@ -81,14 +79,32 @@ export class AnalyticsService implements OnModuleInit {
 
   private async handleMarketSettled(payload: MarketSettledPayload): Promise<void> {
     const { marketId, userId, outcome, payoutKes, winningOutcome } = payload;
+    const won = outcome === winningOutcome;
 
-    // We do not store a separate settlement event per-trade here because TradeEvent
-    // doesn't carry a settlementPnl column. PnL is computed at leaderboard time via
-    // aggregation over the settled market. We do log the event for observability.
-    this.logger.debug(
-      `MarketSettled received: marketId=${marketId} userId=${userId} ` +
-        `outcome=${outcome} winning=${winningOutcome} payoutKes=${payoutKes}`,
-    );
+    try {
+      // Cost basis isn't on this payload — sum what TradeEvent already
+      // recorded for this user in this market (every trade lands there
+      // before settlement can ever fire).
+      const spend = await this.prisma.tradeEvent.aggregate({
+        where: { userId, marketId },
+        _sum: { amountKes: true },
+      });
+      const costKes = Number(spend._sum.amountKes ?? 0);
+
+      await this.prisma.settlementEvent.upsert({
+        where: { userId_marketId: { userId, marketId } },
+        update: {},
+        create: { userId, marketId, won, payoutKes, costKes },
+      });
+
+      this.logger.debug(
+        `Settlement recorded: marketId=${marketId} userId=${userId} won=${won} payoutKes=${payoutKes} costKes=${costKes}`,
+      );
+    } catch (err: unknown) {
+      this.logger.error(
+        `Failed to record SettlementEvent marketId=${marketId} userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   // ─── Leaderboard ───────────────────────────────────────────────────────────
@@ -99,23 +115,27 @@ export class AnalyticsService implements OnModuleInit {
     page: number,
     limit: number,
   ): Promise<{
-    entries: Array<{
-      rank: number | null;
+    period: string;
+    category: string;
+    data: Array<{
+      rank: number;
       userId: string;
-      pnlKes: number;
-      volumeKes: number;
+      displayName: string;
+      profitKes: number;
       tradeCount: number;
+      winRate: number;
     }>;
     total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
   }> {
     const skip = (page - 1) * limit;
+    // The frontend sends the friendly name ("weekly"); rows are stored
+    // under the resolved key computeLeaderboard actually writes to
+    // ("2026-W32") — querying by the literal string never matched a row.
+    const resolvedPeriod = this.resolvePeriodKey(period);
 
     const [entries, total] = await Promise.all([
       this.prisma.leaderboardEntry.findMany({
-        where: { period, category },
+        where: { period: resolvedPeriod, category },
         orderBy: { pnlKes: 'desc' },
         skip,
         take: limit,
@@ -123,26 +143,47 @@ export class AnalyticsService implements OnModuleInit {
           rank: true,
           userId: true,
           pnlKes: true,
-          volumeKes: true,
           tradeCount: true,
+          winRate: true,
         },
       }),
-      this.prisma.leaderboardEntry.count({ where: { period, category } }),
+      this.prisma.leaderboardEntry.count({ where: { period: resolvedPeriod, category } }),
     ]);
 
+    const displayNames = await this.fetchDisplayNames(entries.map((e) => e.userId));
+
     return {
-      entries: entries.map((e) => ({
-        rank: e.rank,
+      period,
+      category,
+      data: entries.map((e, i) => ({
+        rank: e.rank ?? skip + i + 1,
         userId: e.userId,
-        pnlKes: Number(e.pnlKes),
-        volumeKes: Number(e.volumeKes),
+        displayName: displayNames[e.userId] ?? 'Trader',
+        profitKes: Number(e.pnlKes),
         tradeCount: e.tradeCount,
+        winRate: Number(e.winRate),
       })),
       total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
     };
+  }
+
+  private async fetchDisplayNames(userIds: string[]): Promise<Record<string, string>> {
+    if (userIds.length === 0) return {};
+    const userServiceUrl = this.config.get('USER_SERVICE_URL', 'http://localhost:3002');
+    const internalKey = this.config.get('INTERNAL_API_KEY');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<Record<string, string>>(
+          `${userServiceUrl}/api/internal/users/display-names`,
+          { params: { ids: userIds.join(',') }, headers: { 'x-internal-key': internalKey } },
+        ),
+      );
+      return response.data;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to fetch display names for leaderboard: ${msg}`);
+      return {};
+    }
   }
 
   // ─── Market Stats ──────────────────────────────────────────────────────────
@@ -278,26 +319,33 @@ export class AnalyticsService implements OnModuleInit {
     totalPnlKes: number;
     winRate: number;
   }> {
-    const rows = await this.prisma.$queryRaw<UserStatsRow[]>`
-      SELECT
-        COALESCE(SUM(amount_kes), 0)::text       AS total_volume_kes,
-        COUNT(*)::text                            AS total_trades,
-        0::text                                   AS total_pnl_kes,
-        0::text                                   AS win_count
-      FROM trade_events
-      WHERE user_id = ${userId}
-    `;
+    const [volumeRow, settlements] = await Promise.all([
+      this.prisma.tradeEvent.aggregate({
+        where: { userId },
+        _sum: { amountKes: true },
+        _count: { _all: true },
+      }),
+      // Win rate and PnL are only meaningful once a market has settled —
+      // an open position is neither a win nor a loss yet.
+      this.prisma.settlementEvent.findMany({
+        where: { userId },
+        select: { won: true, payoutKes: true, costKes: true },
+      }),
+    ]);
 
-    const row = rows[0];
-    const totalTrades = Number(row?.total_trades ?? 0);
-    const winCount = Number(row?.win_count ?? 0);
+    const settledCount = settlements.length;
+    const winCount = settlements.filter((s) => s.won).length;
+    const totalPnlKes = settlements.reduce(
+      (sum, s) => sum + (Number(s.payoutKes) - Number(s.costKes)),
+      0,
+    );
 
     return {
       userId,
-      totalVolumeKes: Number(row?.total_volume_kes ?? 0),
-      totalTrades,
-      totalPnlKes: Number(row?.total_pnl_kes ?? 0),
-      winRate: totalTrades > 0 ? winCount / totalTrades : 0,
+      totalVolumeKes: Number(volumeRow._sum.amountKes ?? 0),
+      totalTrades: volumeRow._count._all,
+      totalPnlKes,
+      winRate: settledCount > 0 ? winCount / settledCount : 0,
     };
   }
 
@@ -313,15 +361,18 @@ export class AnalyticsService implements OnModuleInit {
       const periodStart = this.periodStart(targetPeriod);
       const periodEnd = this.periodEnd(targetPeriod);
 
+      // Column names are Prisma's camelCase mapping ("userId", "amountKes",
+      // "occurredAt"), not snake_case — this query used the wrong names for
+      // every single run, so the leaderboard cron has never once succeeded.
       const rows = await this.prisma.$queryRaw<LeaderboardRow[]>`
         SELECT
-          user_id                                AS user_id,
-          COALESCE(SUM(amount_kes), 0)::text     AS volume_kes,
-          COUNT(*)::text                         AS trade_count
+          "userId"                                AS user_id,
+          COALESCE(SUM("amountKes"), 0)::text      AS volume_kes,
+          COUNT(*)::text                            AS trade_count
         FROM trade_events
-        WHERE occurred_at >= ${periodStart}
-          AND occurred_at <  ${periodEnd}
-        GROUP BY user_id
+        WHERE "occurredAt" >= ${periodStart}
+          AND "occurredAt" <  ${periodEnd}
+        GROUP BY "userId"
       `;
 
       if (!rows.length) {
@@ -329,10 +380,29 @@ export class AnalyticsService implements OnModuleInit {
         return;
       }
 
+      // PnL and win rate come from settlements within the same window —
+      // previously hardcoded to 0/0 here, so the leaderboard never actually
+      // ranked by profit despite sorting "by pnlKes desc" below.
+      const settlements = await this.prisma.settlementEvent.findMany({
+        where: { settledAt: { gte: periodStart, lt: periodEnd } },
+        select: { userId: true, won: true, payoutKes: true, costKes: true },
+      });
+      const settlementsByUser = new Map<string, { won: boolean; payoutKes: number; costKes: number }[]>();
+      for (const s of settlements) {
+        const list = settlementsByUser.get(s.userId) ?? [];
+        list.push({ won: s.won, payoutKes: Number(s.payoutKes), costKes: Number(s.costKes) });
+        settlementsByUser.set(s.userId, list);
+      }
+
       // Upsert each user's leaderboard entry
       for (const row of rows) {
         const volumeKes = Number(row.volume_kes);
         const tradeCount = Number(row.trade_count);
+        const userSettlements = settlementsByUser.get(row.user_id) ?? [];
+        const pnlKes = userSettlements.reduce((sum, s) => sum + (s.payoutKes - s.costKes), 0);
+        const winRate = userSettlements.length > 0
+          ? userSettlements.filter((s) => s.won).length / userSettlements.length
+          : 0;
 
         await this.prisma.leaderboardEntry.upsert({
           where: {
@@ -346,15 +416,17 @@ export class AnalyticsService implements OnModuleInit {
             userId: row.user_id,
             period: targetPeriod,
             category: 'OVERALL',
-            pnlKes: 0,
+            pnlKes,
             volumeKes,
             tradeCount,
+            winRate,
             computedAt: new Date(),
           },
           update: {
-            pnlKes: 0,
+            pnlKes,
             volumeKes,
             tradeCount,
+            winRate,
             computedAt: new Date(),
           },
         });
@@ -404,13 +476,13 @@ export class AnalyticsService implements OnModuleInit {
 
     const rows = await this.prisma.$queryRaw<MarketVolumeRow[]>`
       SELECT
-        market_id                              AS market_id,
-        COALESCE(SUM(amount_kes), 0)::text     AS volume_kes,
-        COUNT(*)::text                         AS trade_count
+        "marketId"                               AS market_id,
+        COALESCE(SUM("amountKes"), 0)::text      AS volume_kes,
+        COUNT(*)::text                            AS trade_count
       FROM trade_events
-      WHERE occurred_at >= ${periodStart}
-        AND occurred_at <  ${periodEnd}
-      GROUP BY market_id
+      WHERE "occurredAt" >= ${periodStart}
+        AND "occurredAt" <  ${periodEnd}
+      GROUP BY "marketId"
     `;
 
     for (const row of rows) {
@@ -435,6 +507,17 @@ export class AnalyticsService implements OnModuleInit {
   }
 
   // ─── Period Helpers ────────────────────────────────────────────────────────
+
+  /**
+   * Only "weekly" (this week, computed hourly by the cron below) has a real
+   * data source today — daily/monthly/all-time views were never computed by
+   * anything, so a request for one of those falls back to weekly rather than
+   * silently returning nothing for a period the UI still shows as an option.
+   */
+  private resolvePeriodKey(period: string): string {
+    if (/^\d{4}-W\d{2}$/.test(period)) return period; // already a stored key
+    return this.currentWeeklyPeriod();
+  }
 
   private currentWeeklyPeriod(): string {
     const now = new Date();

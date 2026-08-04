@@ -73,6 +73,22 @@ export class UserService {
     return profile?.kycTier ?? 0;
   }
 
+  /**
+   * Batch display-name lookup — analytics-service needs this for the
+   * leaderboard (a page of N users), which would otherwise mean N
+   * sequential internal calls per request.
+   */
+  async getDisplayNamesInternal(userIds: string[]): Promise<Record<string, string>> {
+    if (userIds.length === 0) return {};
+    const profiles = await this.prisma.userProfile.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, displayName: true, phone: true },
+    });
+    return Object.fromEntries(
+      profiles.map((p) => [p.id, p.displayName || `Trader ${p.phone.slice(-4)}`]),
+    );
+  }
+
   // ─── Update own profile ───────────────────────────────────────────────────────
 
   async updateMyProfile(userId: string, dto: { displayName?: string; bio?: string }) {

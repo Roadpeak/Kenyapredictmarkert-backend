@@ -331,4 +331,25 @@ describe('UserService', () => {
       );
     });
   });
+
+  // ── getDisplayNamesInternal ─────────────────────────────────────────────────
+
+  describe('getDisplayNamesInternal', () => {
+    it('maps userId to displayName for each profile found', async () => {
+      mockPrisma.userProfile.findMany.mockResolvedValue([
+        makeProfile({ id: 'user-1', displayName: 'Alice', phone: '254712345678' }),
+        makeProfile({ id: 'user-2', displayName: null, phone: '254798765432' }),
+      ]);
+
+      const result = await service.getDisplayNamesInternal(['user-1', 'user-2']);
+
+      expect(result).toEqual({ 'user-1': 'Alice', 'user-2': 'Trader 5432' });
+    });
+
+    it('returns an empty object without querying when given no ids — the leaderboard calls this once per page', async () => {
+      const result = await service.getDisplayNamesInternal([]);
+      expect(result).toEqual({});
+      expect(mockPrisma.userProfile.findMany).not.toHaveBeenCalled();
+    });
+  });
 });

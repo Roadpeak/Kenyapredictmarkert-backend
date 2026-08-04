@@ -1,4 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { HttpService } from '@nestjs/axios';
+import { ConfigService } from '@nestjs/config';
+import { of, throwError } from 'rxjs';
+import { AxiosHeaders, AxiosResponse } from 'axios';
 import { AnalyticsService } from './analytics.service';
 import { PrismaService } from './prisma.service';
 import { KafkaService } from '@org/kafka-client';
@@ -11,6 +15,10 @@ const mockPrisma = {
     aggregate: jest.fn(),
     findMany: jest.fn(),
     groupBy: jest.fn(),
+  },
+  settlementEvent: {
+    upsert: jest.fn(),
+    findMany: jest.fn(),
   },
   leaderboardEntry: {
     findMany: jest.fn(),
@@ -30,6 +38,15 @@ const mockKafka = {
   publish: jest.fn().mockResolvedValue(undefined),
 };
 
+const mockHttp = { get: jest.fn() };
+const mockConfig = {
+  get: jest.fn((key: string, def?: string) => def ?? 'http://localhost:3002'),
+};
+
+function axiosOk<T>(data: T): AxiosResponse<T> {
+  return { data, status: 200, statusText: 'OK', headers: {}, config: { headers: new AxiosHeaders() } };
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe('AnalyticsService', () => {
@@ -43,6 +60,8 @@ describe('AnalyticsService', () => {
         AnalyticsService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: KafkaService, useValue: mockKafka },
+        { provide: HttpService, useValue: mockHttp },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 
@@ -88,31 +107,77 @@ describe('AnalyticsService', () => {
     });
   });
 
+  // ── handleMarketSettled ─────────────────────────────────────────────────────
+
+  describe('handleMarketSettled (via direct call)', () => {
+    const settledPayload = {
+      marketId: 'market-1',
+      marketTitle: 'Test Market',
+      winningOutcome: 'YES',
+      userId: 'user-1',
+      outcome: 'YES',
+      payoutKes: 960,
+      sharesHeld: 100,
+    };
+
+    it('records a SettlementEvent with cost derived from TradeEvent — previously this was only logged, never stored', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({ _sum: { amountKes: 500 } });
+      mockPrisma.settlementEvent.upsert.mockResolvedValue({});
+
+      await (service as any).handleMarketSettled(settledPayload);
+
+      expect(mockPrisma.settlementEvent.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId_marketId: { userId: 'user-1', marketId: 'market-1' } },
+          create: expect.objectContaining({
+            userId: 'user-1',
+            marketId: 'market-1',
+            won: true,
+            payoutKes: 960,
+            costKes: 500,
+          }),
+        }),
+      );
+    });
+
+    it('marks won=false when the user\'s outcome did not match the winning one', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({ _sum: { amountKes: 500 } });
+      mockPrisma.settlementEvent.upsert.mockResolvedValue({});
+
+      await (service as any).handleMarketSettled({ ...settledPayload, outcome: 'NO', payoutKes: 0 });
+
+      expect(mockPrisma.settlementEvent.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({ create: expect.objectContaining({ won: false, payoutKes: 0 }) }),
+      );
+    });
+
+    it('does not throw when the upsert fails', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({ _sum: { amountKes: 500 } });
+      mockPrisma.settlementEvent.upsert.mockRejectedValue(new Error('DB error'));
+      await expect((service as any).handleMarketSettled(settledPayload)).resolves.toBeUndefined();
+    });
+  });
+
   // ── getLeaderboard ──────────────────────────────────────────────────────────
 
   describe('getLeaderboard', () => {
-    const entry = {
-      rank: 1,
-      userId: 'user-1',
-      pnlKes: { toNumber: () => 2500 } as any,
-      volumeKes: { toNumber: () => 10000 } as any,
-      tradeCount: 42,
-    };
+    beforeEach(() => {
+      mockHttp.get.mockReturnValue(of(axiosOk({ 'user-1': 'Alice' })));
+    });
 
-    it('returns paginated entries with numeric conversion', async () => {
+    it('returns paginated entries with numeric conversion and resolved display names', async () => {
       mockPrisma.leaderboardEntry.findMany.mockResolvedValue([{
-        rank: 1, userId: 'user-1', pnlKes: 2500, volumeKes: 10000, tradeCount: 42,
+        rank: 1, userId: 'user-1', pnlKes: 2500, tradeCount: 42, winRate: 0.6,
       }]);
       mockPrisma.leaderboardEntry.count.mockResolvedValue(1);
 
       const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 20);
 
       expect(result).toMatchObject({
-        entries: [expect.objectContaining({ rank: 1, userId: 'user-1', tradeCount: 42 })],
+        period: '2026-W23',
+        category: 'OVERALL',
+        data: [expect.objectContaining({ rank: 1, userId: 'user-1', displayName: 'Alice', profitKes: 2500, tradeCount: 42, winRate: 0.6 })],
         total: 1,
-        page: 1,
-        limit: 20,
-        totalPages: 1,
       });
     });
 
@@ -127,12 +192,25 @@ describe('AnalyticsService', () => {
       );
     });
 
-    it('calculates totalPages correctly', async () => {
+    it('resolves a friendly period name ("weekly") to the current stored ISO-week key — previously this never matched any row', async () => {
       mockPrisma.leaderboardEntry.findMany.mockResolvedValue([]);
-      mockPrisma.leaderboardEntry.count.mockResolvedValue(25);
+      mockPrisma.leaderboardEntry.count.mockResolvedValue(0);
+
+      await service.getLeaderboard('weekly', 'OVERALL', 1, 10);
+
+      const call = mockPrisma.leaderboardEntry.findMany.mock.calls[0][0];
+      expect(call.where.period).toMatch(/^\d{4}-W\d{2}$/);
+    });
+
+    it('falls back to an empty displayName map when user-service is unreachable, rather than failing the whole request', async () => {
+      mockHttp.get.mockReturnValue(throwError(() => new Error('ECONNREFUSED')));
+      mockPrisma.leaderboardEntry.findMany.mockResolvedValue([
+        { rank: 1, userId: 'user-1', pnlKes: 100, tradeCount: 1, winRate: 1 },
+      ]);
+      mockPrisma.leaderboardEntry.count.mockResolvedValue(1);
 
       const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 10);
-      expect(result.totalPages).toBe(3);
+      expect(result.data[0].displayName).toBe('Trader');
     });
   });
 
@@ -184,9 +262,12 @@ describe('AnalyticsService', () => {
   // ── getUserStats ────────────────────────────────────────────────────────────
 
   describe('getUserStats', () => {
-    it('returns stats from raw query with numeric coercion', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([
-        { total_volume_kes: '15000', total_trades: '30', total_pnl_kes: '2000', win_count: '18' },
+    it('computes real PnL and win rate from SettlementEvent — previously these were hardcoded to 0', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({ _sum: { amountKes: 15000 }, _count: { _all: 30 } });
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { won: true, payoutKes: 1000, costKes: 400 },
+        { won: false, payoutKes: 0, costKes: 300 },
+        { won: true, payoutKes: 500, costKes: 200 },
       ]);
 
       const result = await service.getUserStats('user-1');
@@ -195,18 +276,17 @@ describe('AnalyticsService', () => {
         userId: 'user-1',
         totalVolumeKes: 15000,
         totalTrades: 30,
-        totalPnlKes: 2000,
-        winRate: 0.6,
+        totalPnlKes: 600, // (1000-400) + (0-300) + (500-200)
+        winRate: 2 / 3,
       });
     });
 
-    it('returns zeros and winRate 0 when no trades', async () => {
-      mockPrisma.$queryRaw.mockResolvedValue([
-        { total_volume_kes: '0', total_trades: '0', total_pnl_kes: '0', win_count: '0' },
-      ]);
+    it('returns zeros and winRate 0 when there are no settlements yet (open positions only)', async () => {
+      mockPrisma.tradeEvent.aggregate.mockResolvedValue({ _sum: { amountKes: 0 }, _count: { _all: 0 } });
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([]);
 
       const result = await service.getUserStats('user-1');
-      expect(result).toMatchObject({ totalTrades: 0, winRate: 0 });
+      expect(result).toMatchObject({ totalTrades: 0, totalPnlKes: 0, winRate: 0 });
     });
   });
 
@@ -225,6 +305,7 @@ describe('AnalyticsService', () => {
           { market_id: 'market-1', volume_kes: '8000', trade_count: '16' },
         ]);
 
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([]);
       mockPrisma.leaderboardEntry.upsert.mockResolvedValue({});
       mockPrisma.leaderboardEntry.findMany.mockResolvedValue([
         { id: 'entry-1' },
@@ -241,6 +322,39 @@ describe('AnalyticsService', () => {
       expect(mockPrisma.leaderboardEntry.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({ userId_period_category: expect.objectContaining({ userId: 'user-1' }) }),
+        }),
+      );
+    });
+
+    it('computes real pnlKes and winRate per user from settlements in the period window — previously both were hardcoded to 0', async () => {
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { userId: 'user-1', won: true, payoutKes: 1000, costKes: 400 },
+        { userId: 'user-1', won: false, payoutKes: 0, costKes: 100 },
+        { userId: 'user-2', won: true, payoutKes: 300, costKes: 200 },
+      ]);
+
+      await service.computeLeaderboard('2026-W23');
+
+      expect(mockPrisma.leaderboardEntry.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ userId: 'user-1', pnlKes: 500, winRate: 0.5 }),
+        }),
+      );
+      expect(mockPrisma.leaderboardEntry.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ userId: 'user-2', pnlKes: 100, winRate: 1 }),
+        }),
+      );
+    });
+
+    it('gives a user with trades but no settlements yet pnlKes 0 and winRate 0, not a crash', async () => {
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([]);
+
+      await service.computeLeaderboard('2026-W23');
+
+      expect(mockPrisma.leaderboardEntry.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          create: expect.objectContaining({ userId: 'user-1', pnlKes: 0, winRate: 0 }),
         }),
       );
     });

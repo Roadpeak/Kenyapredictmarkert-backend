@@ -46,71 +46,17 @@ describe('FeedService', () => {
   // ── getUserFeed ─────────────────────────────────────────────────────────────
 
   describe('getUserFeed', () => {
-    it('returns empty feed for user with no items', () => {
+    it('returns empty feed for user with no items, shaped as Paginated<ActivityItem>', () => {
       const result = service.getUserFeed('user-nobody', 1, 20);
-      expect(result).toEqual({ items: [], total: 0, page: 1, limit: 20 });
+      expect(result).toEqual({ data: [], total: 0, page: 1, limit: 20 });
     });
 
     it('returns correct page slice', () => {
-      // Inject items directly via the module-scope map using addToFeed logic
-      // We inject by calling onModuleInit subscriber callbacks manually via the service
-      // Instead, test by triggering the Kafka subscriber callbacks
-      const addToFeedFn: (item: FeedItem) => void = (service as any).constructor
-        ? (() => {
-            // Access the module-level addToFeed via service internals
-            // The userFeeds map is module-level, so we call getUserFeed after population
-            return undefined;
-          })
-        : undefined;
-
-      // Populate the feed by simulating Kafka callback for onModuleInit
-      // We must call the private addToFeed function — access it via the module
-      const feedItems: FeedItem[] = Array.from({ length: 5 }, (_, i) => ({
-        id: `trade-${i}`,
-        userId: 'user-paged',
-        type: 'TRADE_CONFIRMED',
-        title: 'Trade Placed',
-        body: `Trade ${i}`,
-        metadata: {},
-        occurredAt: new Date(),
-      }));
-
-      // Simulate calling the module-level addToFeed via the subscriber registered in onModuleInit
-      // We'll invoke it through the captured callback when subscribe is called
-      const subscribeCalls: Array<[string, string[], Function]> = [];
-      (mockKafka.subscribe as jest.Mock).mockImplementation(
-        (_group: string, _topics: string[], callback: Function) => {
-          subscribeCalls.push([_group, _topics, callback]);
-          return Promise.resolve();
-        },
-      );
-
-      // Re-init to capture callbacks
-      // Actually, the simplest approach: call addToFeed via the module-level export
-      // FeedService exposes getUserFeed which reads from the module-level Map.
-      // We need to populate that Map. The onModuleInit registers subscribers;
-      // let's call the handler directly on a re-created service.
-
-      // Simpler: just test the return shape with the empty-state guarantee
       const result = service.getUserFeed('user-paged', 1, 3);
-      expect(result).toMatchObject({ items: expect.any(Array), total: 0, page: 1, limit: 3 });
+      expect(result).toMatchObject({ data: expect.any(Array), total: 0, page: 1, limit: 3 });
     });
 
     it('paginates correctly', () => {
-      // We can test pagination math by populating via onModuleInit callback
-      // Re-test with a fresh module where we manually call the Kafka callback
-      let capturedCallback: ((_topic: string, payload: any) => Promise<void>) | null = null;
-
-      (mockKafka.subscribe as jest.Mock).mockImplementation(
-        (_group: string, _topics: string[], callback: Function) => {
-          if (_group === 'feed-trade-confirmed-group') {
-            capturedCallback = callback as any;
-          }
-          return Promise.resolve();
-        },
-      );
-
-      // We'll test this in the onModuleInit integration test below
       expect(service.getUserFeed('any', 1, 10)).toMatchObject({ page: 1, limit: 10 });
     });
   });
@@ -185,9 +131,10 @@ describe('FeedService', () => {
 
       const feed = service.getUserFeed('user-feed-test', 1, 20);
       expect(feed.total).toBe(1);
-      expect(feed.items[0]).toMatchObject({
+      expect(feed.data[0]).toMatchObject({
         type: 'TRADE_CONFIRMED',
-        userId: 'user-feed-test',
+        marketId: 'market-1',
+        payload: expect.objectContaining({ outcome: 'YES', sharesCount: 10, amountKes: 1000 }),
       });
     });
 
@@ -260,8 +207,8 @@ describe('FeedService', () => {
       });
 
       const feed = service.getUserFeed('user-order-test', 1, 20);
-      expect(feed.items[0].id).toBe('second-trade');
-      expect(feed.items[1].id).toBe('first-trade');
+      expect(feed.data[0].payload).toMatchObject({ outcome: 'NO', amountKes: 200 });
+      expect(feed.data[1].payload).toMatchObject({ outcome: 'YES', amountKes: 100 });
     });
   });
 });

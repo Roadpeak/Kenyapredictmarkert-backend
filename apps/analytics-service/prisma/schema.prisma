@@ -24,6 +24,23 @@ model TradeEvent {
   @@map("trade_events")
 }
 
+/// One row per (user, market) settlement — previously handleMarketSettled
+/// only logged this payload, so PnL and win rate had no real data source
+/// and were hardcoded to 0 everywhere they were reported.
+model SettlementEvent {
+  id         String   @id @default(cuid())
+  userId     String
+  marketId   String
+  won        Boolean
+  payoutKes  Decimal  @db.Decimal(15, 2)
+  costKes    Decimal  @db.Decimal(15, 2)
+  settledAt  DateTime @default(now())
+
+  @@unique([userId, marketId])
+  @@index([userId, settledAt])
+  @@map("settlement_events")
+}
+
 model LeaderboardEntry {
   id           String   @id @default(cuid())
   userId       String
@@ -32,6 +49,7 @@ model LeaderboardEntry {
   pnlKes       Decimal  @db.Decimal(15, 2)
   volumeKes    Decimal  @db.Decimal(15, 2)
   tradeCount   Int      @default(0)
+  winRate      Decimal  @default(0) @db.Decimal(5, 4)
   rank         Int?
   computedAt   DateTime @default(now())
 
