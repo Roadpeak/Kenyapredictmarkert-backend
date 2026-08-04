@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { NotificationService } from './notification.service';
 import { PrismaService } from './prisma.service';
 import { PushService } from './push.service';
+import { KafkaService } from '@org/kafka-client';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,10 @@ const mockPrisma = {
 
 const mockPush = {
   sendMulticast: jest.fn().mockResolvedValue(undefined),
+};
+
+const mockKafka = {
+  publish: jest.fn().mockResolvedValue(undefined),
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -51,6 +56,7 @@ describe('NotificationService', () => {
         NotificationService,
         { provide: PrismaService, useValue: mockPrisma },
         { provide: PushService, useValue: mockPush },
+        { provide: KafkaService, useValue: mockKafka },
       ],
     }).compile();
 
@@ -72,7 +78,7 @@ describe('NotificationService', () => {
     };
 
     beforeEach(() => {
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
       mockPrisma.deviceToken.findMany.mockResolvedValue([]);
     });
 
@@ -118,7 +124,7 @@ describe('NotificationService', () => {
 
   describe('onMarketSettled', () => {
     beforeEach(() => {
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
       mockPrisma.deviceToken.findMany.mockResolvedValue([]);
     });
 
@@ -145,7 +151,7 @@ describe('NotificationService', () => {
 
   describe('onDepositCompleted', () => {
     it('creates deposit notification with receipt number in body', async () => {
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
       mockPrisma.deviceToken.findMany.mockResolvedValue([]);
 
       await service.onDepositCompleted({ userId: 'user-1', paymentId: 'pay-1', amountKes: 2000, mpesaReceiptNumber: 'NLJ7RT61SV' } as any);
@@ -160,7 +166,7 @@ describe('NotificationService', () => {
 
   describe('onWithdrawalCompleted', () => {
     it('creates withdrawal completed notification with phone', async () => {
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
       mockPrisma.deviceToken.findMany.mockResolvedValue([]);
 
       await service.onWithdrawalCompleted({ userId: 'user-1', paymentId: 'pay-1', amountKes: 3000, phone: '254712345678' } as any);
@@ -175,7 +181,7 @@ describe('NotificationService', () => {
 
   describe('onWithdrawalFailed', () => {
     it('creates failure notification with reason', async () => {
-      mockPrisma.notification.create.mockResolvedValue({});
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
       mockPrisma.deviceToken.findMany.mockResolvedValue([]);
 
       await service.onWithdrawalFailed({ userId: 'user-1', amountKes: 1000, reason: 'Network error' } as any);
@@ -183,6 +189,49 @@ describe('NotificationService', () => {
       const call = mockPrisma.notification.create.mock.calls[0][0];
       expect(call.data.title).toBe('Withdrawal Failed');
       expect(call.data.body).toContain('Network error');
+    });
+  });
+
+  // ── onKycReviewed ───────────────────────────────────────────────────────────
+
+  describe('onKycReviewed', () => {
+    beforeEach(() => {
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-1', createdAt: new Date() });
+      mockPrisma.deviceToken.findMany.mockResolvedValue([]);
+    });
+
+    it('creates a KYC_APPROVED notification when approved', async () => {
+      await service.onKycReviewed({ userId: 'user-1', approved: true, message: 'You can now withdraw more.' } as any);
+
+      const call = mockPrisma.notification.create.mock.calls[0][0];
+      expect(call.data.type).toBe('KYC_APPROVED');
+      expect(call.data.title).toBe('Identity Verified');
+      expect(call.data.body).toBe('You can now withdraw more.');
+    });
+
+    it('creates a KYC_REJECTED notification when not approved — previously nothing was sent on rejection', async () => {
+      await service.onKycReviewed({ userId: 'user-1', approved: false, message: 'Blurry ID photo.' } as any);
+
+      const call = mockPrisma.notification.create.mock.calls[0][0];
+      expect(call.data.type).toBe('KYC_REJECTED');
+      expect(call.data.title).toBe('Verification Not Approved');
+      expect(call.data.body).toBe('Blurry ID photo.');
+    });
+  });
+
+  // ── createAndSend / NOTIFICATION_CREATED ────────────────────────────────────
+
+  describe('createAndSend (via onDepositCompleted)', () => {
+    it('publishes NOTIFICATION_CREATED so the gateway can push it live, not just persist it', async () => {
+      mockPrisma.notification.create.mockResolvedValue({ id: 'notif-42', createdAt: new Date('2026-01-01T00:00:00Z') });
+      mockPrisma.deviceToken.findMany.mockResolvedValue([]);
+
+      await service.onDepositCompleted({ userId: 'user-1', paymentId: 'pay-1', amountKes: 2000, mpesaReceiptNumber: 'ABC123' } as any);
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('notification.created'),
+        expect.objectContaining({ userId: 'user-1', id: 'notif-42', title: 'Deposit Received' }),
+      );
     });
   });
 

@@ -222,6 +222,18 @@ describe('TradingService', () => {
       );
     });
 
+    it('includes marketTitle and sharesCount in TRADE_CONFIRMED — the notification consumer reads these exact field names and previously got undefined for both', async () => {
+      mockHttp.get.mockReturnValue(of(axiosResponse({ status: 'ACTIVE', id: 'market-1', title: 'Will it rain tomorrow?' })));
+
+      await service.placeTrade('user-1', dto as any);
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('trade-confirmed'),
+        expect.objectContaining({ marketTitle: 'Will it rain tomorrow?', sharesCount: 10 }),
+        expect.any(String),
+      );
+    });
+
     it('calls wallet reserve before touching pool', async () => {
       await service.placeTrade('user-1', dto as any);
       // First post call should be to reserve endpoint
@@ -327,6 +339,18 @@ describe('TradingService', () => {
     it('creates the option trade and returns confirmation', async () => {
       const result = await service.placeOptionTrade('user-1', dto);
       expect(result).toMatchObject({ label: 'A', amountKes: 300, sharesReceived: 30, status: 'CONFIRMED' });
+    });
+
+    it('includes marketTitle and sharesCount in TRADE_CONFIRMED for a MULTI trade too', async () => {
+      mockHttp.get.mockReturnValue(of(axiosResponse({ status: 'ACTIVE', id: 'market-1', title: "Who wins the Ballon d'Or?" })));
+
+      await service.placeOptionTrade('user-1', dto);
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('trade-confirmed'),
+        expect.objectContaining({ marketTitle: "Who wins the Ballon d'Or?", sharesCount: 30, outcome: 'A' }),
+        expect.any(String),
+      );
     });
 
     it('publishes MARKET_OPTION_PRICE_UPDATED with every option in the market, not just the traded one', async () => {
@@ -594,6 +618,24 @@ describe('TradingService', () => {
 
       expect(mockPrisma.position.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({ data: { isSettled: true, payoutKes: 0 } }),
+      );
+    });
+
+    it('fans out a settlement message to losers too, not just winners — previously they got silence', async () => {
+      mockPrisma.position.findMany
+        .mockResolvedValueOnce([makePosition({ userId: 'winner-1', totalShares: 100 })]) // winning side
+        .mockResolvedValueOnce([makePosition({ userId: 'loser-1', outcome: 'NO', totalShares: 50 })]); // losing side
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool({ yesShares: 100 }));
+      mockPrisma.settlement.upsert.mockResolvedValue({});
+      mockPrisma.position.update.mockResolvedValue({});
+      mockPrisma.position.updateMany.mockResolvedValue({ count: 1 });
+
+      await service.settleMarket(payload as any);
+
+      expect(mockKafka.publishBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ payload: expect.objectContaining({ userId: 'loser-1', outcome: 'NO', payoutKes: 0 }) }),
+        ]),
       );
     });
   });

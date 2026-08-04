@@ -47,6 +47,8 @@ TOPICS=(
   kmkt.notification.send-sms
   kmkt.notification.send-push
   kmkt.notification.send-email
+  kmkt.notification.kyc-reviewed
+  kmkt.notification.created
 
   # Analytics
   kmkt.analytics.trade-event

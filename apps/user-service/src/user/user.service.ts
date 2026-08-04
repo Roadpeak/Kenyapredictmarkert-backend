@@ -2,7 +2,7 @@ import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from './prisma.service';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 import { generateReferralCode } from '@org/utils';
-import { UserRegisteredPayload } from '@org/types';
+import { UserRegisteredPayload, NotificationType } from '@org/types';
 
 @Injectable()
 export class UserService {
@@ -149,7 +149,7 @@ export class UserService {
       data: { status: 'APPROVED', reviewedBy: adminId, reviewedAt: new Date() },
     });
 
-    await this.prisma.userProfile.update({
+    const profile = await this.prisma.userProfile.update({
       where: { id: userId },
       data: {
         kycStatus: 'APPROVED',
@@ -158,11 +158,18 @@ export class UserService {
       },
     });
 
+    const message = 'Your identity verification has been approved. You can now withdraw up to KES 150,000/day.';
+
     await this.kafka.publish(KAFKA_TOPICS.NOTIFICATION_SEND_SMS, {
       userId,
-      phone: '',
-      message: 'Your identity verification has been approved. You can now withdraw up to KES 150,000/day.',
-      notificationType: 'KYC_APPROVED',
+      phone: profile.phone,
+      message,
+      notificationType: NotificationType.KYC_APPROVED,
+    });
+    await this.kafka.publish(KAFKA_TOPICS.NOTIFICATION_KYC_REVIEWED, {
+      userId,
+      approved: true,
+      message,
     });
 
     this.logger.log(`KYC approved for user: ${userId}`);
@@ -180,11 +187,30 @@ export class UserService {
       },
     });
 
-    await this.prisma.userProfile.update({
+    const profile = await this.prisma.userProfile.update({
       where: { id: userId },
       data: { kycStatus: 'REJECTED' },
     });
 
+    const message = note
+      ? `Your identity verification was not approved: ${note}. You can resubmit your documents.`
+      : 'Your identity verification was not approved. You can resubmit your documents.';
+
+    // Previously sent nothing on rejection — a rejected user had no way of
+    // knowing short of checking the KYC page themselves.
+    await this.kafka.publish(KAFKA_TOPICS.NOTIFICATION_SEND_SMS, {
+      userId,
+      phone: profile.phone,
+      message,
+      notificationType: NotificationType.KYC_REJECTED,
+    });
+    await this.kafka.publish(KAFKA_TOPICS.NOTIFICATION_KYC_REVIEWED, {
+      userId,
+      approved: false,
+      message,
+    });
+
+    this.logger.log(`KYC rejected for user: ${userId}`);
     return { message: 'KYC rejected' };
   }
 

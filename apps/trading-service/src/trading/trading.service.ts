@@ -47,7 +47,7 @@ export class TradingService {
     }
 
     // Verify market is active via market-service
-    await this.assertMarketActive(dto.marketId);
+    const market = await this.assertMarketActive(dto.marketId);
 
     // Reserve funds in wallet-service before touching pool
     await this.reserveWalletFunds(userId, dto.amountKes, dto.idempotencyKey);
@@ -70,8 +70,10 @@ export class TradingService {
             tradeId: trade.id,
             userId,
             marketId: dto.marketId,
+            marketTitle: market?.title ?? dto.marketId,
             outcome: dto.outcome,
             amountKes: dto.amountKes,
+            sharesCount: Number(trade.sharesReceived),
             sharesReceived: Number(trade.sharesReceived),
             pricePerShare: Number(trade.pricePerShare),
           },
@@ -413,30 +415,55 @@ export class TradingService {
       settlements.push({ userId: position.userId, sharesHeld: Number(position.totalShares), payoutKes });
     }
 
-    // Mark losing positions as settled (no payout)
+    // Losing side — settled with no payout, but still fanned out below so
+    // these users get a "market resolved" notification too, not just silence.
+    const losingOutcome = outcome === 'YES' ? 'NO' : 'YES';
+    const losingPositions = await this.prisma.position.findMany({
+      where: { marketId, outcome: losingOutcome, isSettled: false },
+    });
     await this.prisma.position.updateMany({
-      where: { marketId, outcome: outcome === 'YES' ? 'NO' : 'YES', isSettled: false },
+      where: { marketId, outcome: losingOutcome, isSettled: false },
       data: { isSettled: true, payoutKes: 0 },
     });
 
-    // Publish one settlement message per winner (fan-out) — wallet-service and notification-service consume
+    // Publish one settlement message per position holder, winners and losers
+    // alike (fan-out) — wallet-service and notification-service consume.
+    // Previously only winners were published here, so a losing position
+    // never told its owner the market had even resolved.
     await this.kafka.publishBatch(
-      settlements.map((s) => ({
-        topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
-        key: s.userId,
-        payload: {
-          marketId,
-          marketTitle: marketTitle ?? marketId,
-          winningOutcome: outcome as Outcome,
-          userId: s.userId,
-          outcome: outcome as Outcome,
-          payoutKes: s.payoutKes,
-          sharesHeld: s.sharesHeld,
-        },
-      })),
+      [
+        ...settlements.map((s) => ({
+          topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
+          key: s.userId,
+          payload: {
+            marketId,
+            marketTitle: marketTitle ?? marketId,
+            winningOutcome: outcome as Outcome,
+            userId: s.userId,
+            outcome: outcome as Outcome,
+            payoutKes: s.payoutKes,
+            sharesHeld: s.sharesHeld,
+          },
+        })),
+        ...losingPositions.map((p) => ({
+          topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
+          key: p.userId,
+          payload: {
+            marketId,
+            marketTitle: marketTitle ?? marketId,
+            winningOutcome: outcome as Outcome,
+            userId: p.userId,
+            outcome: losingOutcome as Outcome,
+            payoutKes: 0,
+            sharesHeld: Number(p.totalShares),
+          },
+        })),
+      ],
     );
 
-    this.logger.log(`Settlement fan-out sent for market ${marketId}: ${settlements.length} winners`);
+    this.logger.log(
+      `Settlement fan-out sent for market ${marketId}: ${settlements.length} winners, ${losingPositions.length} losers`,
+    );
   }
 
   // ─── Refund all positions (cancelled market) ──────────────────────────────────
@@ -691,7 +718,7 @@ export class TradingService {
       throw new NotFoundException('Option not found for this market');
     }
 
-    await this.assertMarketActive(dto.marketId);
+    const market = await this.assertMarketActive(dto.marketId);
     await this.reserveWalletFunds(userId, dto.amountKes, dto.idempotencyKey);
 
     try {
@@ -708,8 +735,10 @@ export class TradingService {
           tradeId: trade.id,
           userId,
           marketId: dto.marketId,
+          marketTitle: market?.title ?? dto.marketId,
           outcome: trade.label,
           amountKes: dto.amountKes,
+          sharesCount: Number(trade.sharesReceived),
           sharesReceived: Number(trade.sharesReceived),
           pricePerShare: Number(trade.pricePerShare),
         },

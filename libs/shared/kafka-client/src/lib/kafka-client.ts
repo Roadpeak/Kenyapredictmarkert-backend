@@ -45,6 +45,8 @@ export const KAFKA_TOPICS = {
   NOTIFICATION_SEND_SMS: 'kmkt.notification.send-sms',
   NOTIFICATION_SEND_PUSH: 'kmkt.notification.send-push',
   NOTIFICATION_SEND_EMAIL: 'kmkt.notification.send-email',
+  NOTIFICATION_KYC_REVIEWED: 'kmkt.notification.kyc-reviewed',
+  NOTIFICATION_CREATED: 'kmkt.notification.created',
 
   // Analytics
   ANALYTICS_TRADE_EVENT: 'kmkt.analytics.trade-event',

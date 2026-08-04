@@ -190,6 +190,21 @@ export interface SendSmsPayload {
   notificationType: NotificationType;
 }
 
+export interface KycReviewedPayload {
+  userId: string;
+  approved: boolean;
+  message: string;
+}
+
+export interface NotificationCreatedPayload {
+  userId: string;
+  id: string;
+  type: NotificationType;
+  title: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface SendPushPayload {
   userId: string;
   title: string;

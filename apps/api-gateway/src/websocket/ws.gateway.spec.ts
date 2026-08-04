@@ -174,5 +174,21 @@ describe('WsGateway', () => {
       expect(gateway.server.to).toHaveBeenCalledWith('user:user-1');
       expect((gateway.server as any)._emitResult.emit).toHaveBeenCalledWith('payment:update', update);
     });
+
+    it('emitNotificationCreated emits notification:created to the owning user\'s room', () => {
+      const payload = { userId: 'user-1', id: 'notif-1', type: 'KYC_APPROVED', title: 'Identity Verified', body: 'You are approved.', createdAt: '2026-01-01T00:00:00.000Z' };
+      gateway.emitNotificationCreated(payload as any);
+
+      expect(gateway.server.to).toHaveBeenCalledWith('user:user-1');
+      expect((gateway.server as any)._emitResult.emit).toHaveBeenCalledWith('notification:created', payload);
+    });
+
+    it('emitMarketSettled emits market:settled to the owning user\'s room — previously nothing emitted this event at all', () => {
+      const payload = { marketId: 'm-1', marketTitle: 'Test', winningOutcome: 'YES', userId: 'user-1', outcome: 'NO', payoutKes: 0, sharesHeld: 50 };
+      gateway.emitMarketSettled(payload as any);
+
+      expect(gateway.server.to).toHaveBeenCalledWith('user:user-1');
+      expect((gateway.server as any)._emitResult.emit).toHaveBeenCalledWith('market:settled', payload);
+    });
   });
 });

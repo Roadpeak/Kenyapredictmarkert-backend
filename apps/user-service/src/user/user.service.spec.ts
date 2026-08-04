@@ -192,6 +192,30 @@ describe('UserService', () => {
       await service.approveKyc('user-1', 'admin-1');
       expect(mockKafka.publish).toHaveBeenCalled();
     });
+
+    it('sends the SMS to the user\'s real phone number, not a blank string', async () => {
+      mockPrisma.kycDocument.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.userProfile.update.mockResolvedValue(makeProfile({ phone: '254799887766' }));
+
+      await service.approveKyc('user-1', 'admin-1');
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('send-sms'),
+        expect.objectContaining({ phone: '254799887766' }),
+      );
+    });
+
+    it('publishes an in-app KYC-reviewed notification, not just SMS', async () => {
+      mockPrisma.kycDocument.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.userProfile.update.mockResolvedValue(makeProfile());
+
+      await service.approveKyc('user-1', 'admin-1');
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('kyc-reviewed'),
+        expect.objectContaining({ userId: 'user-1', approved: true }),
+      );
+    });
   });
 
   // ── rejectKyc ───────────────────────────────────────────────────────────────
@@ -210,6 +234,22 @@ describe('UserService', () => {
       );
       expect(mockPrisma.userProfile.update).toHaveBeenCalledWith(
         expect.objectContaining({ data: { kycStatus: 'REJECTED' } }),
+      );
+    });
+
+    it('notifies the user on rejection — previously this sent nothing at all', async () => {
+      mockPrisma.kycDocument.updateMany.mockResolvedValue({ count: 1 });
+      mockPrisma.userProfile.update.mockResolvedValue(makeProfile({ kycStatus: 'REJECTED', phone: '254711223344' }));
+
+      await service.rejectKyc('user-1', 'admin-1', 'Document unclear');
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('send-sms'),
+        expect.objectContaining({ phone: '254711223344', message: expect.stringContaining('Document unclear') }),
+      );
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('kyc-reviewed'),
+        expect.objectContaining({ userId: 'user-1', approved: false }),
       );
     });
   });

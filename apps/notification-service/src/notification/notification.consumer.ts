@@ -9,6 +9,7 @@ import type {
   WithdrawalCompletedPayload,
   WithdrawalFailedPayload,
   SendSmsPayload,
+  KycReviewedPayload,
 } from '@org/types';
 
 @Injectable()
@@ -70,6 +71,14 @@ export class NotificationConsumer implements OnModuleInit, OnModuleDestroy {
       [KAFKA_TOPICS.PAYMENT_WITHDRAWAL_FAILED],
       async (_topic, payload) => {
         await this.notificationService.onWithdrawalFailed(payload);
+      },
+    );
+
+    await this.kafka.subscribe<KycReviewedPayload>(
+      'notification-kyc-group',
+      [KAFKA_TOPICS.NOTIFICATION_KYC_REVIEWED],
+      async (_topic, payload) => {
+        await this.notificationService.onKycReviewed(payload);
       },
     );
 

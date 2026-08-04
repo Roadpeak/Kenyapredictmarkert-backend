@@ -11,7 +11,13 @@ import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import type { JwtPayload, WsMarketPriceUpdate, WsPaymentUpdate } from '@org/types';
+import type {
+  JwtPayload,
+  MarketSettledPayload,
+  NotificationCreatedPayload,
+  WsMarketPriceUpdate,
+  WsPaymentUpdate,
+} from '@org/types';
 
 @WebSocketGateway({
   cors: { origin: '*', credentials: true },
@@ -88,5 +94,13 @@ export class WsGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   emitPaymentUpdate(userId: string, update: WsPaymentUpdate) {
     this.server.to(`user:${userId}`).emit('payment:update', update);
+  }
+
+  emitNotificationCreated(payload: NotificationCreatedPayload) {
+    this.server.to(`user:${payload.userId}`).emit('notification:created', payload);
+  }
+
+  emitMarketSettled(payload: MarketSettledPayload) {
+    this.server.to(`user:${payload.userId}`).emit('market:settled', payload);
   }
 }

@@ -7,9 +7,11 @@ import type {
   DepositCompletedPayload,
   WithdrawalCompletedPayload,
   WithdrawalFailedPayload,
+  KycReviewedPayload,
 } from '@org/types';
 import { NotificationChannel, NotificationType } from '@org/types';
 import { NotificationStatus } from '.prisma/notification-client';
+import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 
 @Injectable()
 export class NotificationService {
@@ -18,6 +20,7 @@ export class NotificationService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly push: PushService,
+    private readonly kafka: KafkaService,
   ) {}
 
   // ─── Kafka event handlers ──────────────────────────────────────────────────
@@ -64,6 +67,15 @@ export class NotificationService {
     const body = `Your withdrawal of KES ${amountKes.toLocaleString()} failed. ${reason ?? 'Please try again.'}`;
 
     await this.createAndSend(userId, NotificationType.WITHDRAWAL_FAILED, 'Withdrawal Failed', body);
+  }
+
+  async onKycReviewed(payload: KycReviewedPayload): Promise<void> {
+    const { userId, approved, message } = payload;
+
+    const type = approved ? NotificationType.KYC_APPROVED : NotificationType.KYC_REJECTED;
+    const title = approved ? 'Identity Verified' : 'Verification Not Approved';
+
+    await this.createAndSend(userId, type, title, message);
   }
 
   // ─── In-app notification reads ─────────────────────────────────────────────
@@ -123,7 +135,7 @@ export class NotificationService {
     body: string,
   ): Promise<void> {
     // Persist in-app notification
-    await this.prisma.notification.create({
+    const notification = await this.prisma.notification.create({
       data: {
         userId,
         type,
@@ -133,6 +145,17 @@ export class NotificationService {
         status: NotificationStatus.SENT,
         sentAt: new Date(),
       },
+    });
+
+    // Tells the gateway to push this to the user's socket instantly instead
+    // of the client waiting on its next 30s poll to notice.
+    await this.kafka.publish(KAFKA_TOPICS.NOTIFICATION_CREATED, {
+      userId,
+      id: notification.id,
+      type,
+      title,
+      body,
+      createdAt: notification.createdAt.toISOString(),
     });
 
     // Get user's push tokens and phone for SMS (fetched from user-service or stored here)

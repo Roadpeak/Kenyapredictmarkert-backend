@@ -7,6 +7,7 @@ import type {
   DepositCompletedPayload,
   WithdrawalCompletedPayload,
   WithdrawalFailedPayload,
+  NotificationCreatedPayload,
 } from '@org/types';
 
 @Injectable()
@@ -37,12 +38,16 @@ export class WsConsumer implements OnModuleInit, OnModuleDestroy {
       },
     );
 
-    // Wallet credited after settlement — tell client to refetch balance
+    // Wallet credited after settlement — tell client to refetch balance, and
+    // push the resolution itself so the frontend's market:settled listener
+    // (previously wired up but nothing ever emitted it) actually fires, for
+    // winners and losers alike.
     await this.kafka.subscribe<MarketSettledPayload>(
       'gateway-settlement-group',
       [KAFKA_TOPICS.TRADING_MARKET_SETTLED],
       async (_topic, payload) => {
         this.ws.emitWalletRefetch(payload.userId);
+        this.ws.emitMarketSettled(payload);
       },
     );
 
@@ -91,6 +96,16 @@ export class WsConsumer implements OnModuleInit, OnModuleDestroy {
           amountKes: payload.amountKes,
           timestamp: Date.now(),
         });
+      },
+    );
+
+    // New in-app notification created — pushes it straight to the bell
+    // instead of the client waiting on its next poll interval.
+    await this.kafka.subscribe<NotificationCreatedPayload>(
+      'gateway-notification-group',
+      [KAFKA_TOPICS.NOTIFICATION_CREATED],
+      async (_topic, payload) => {
+        this.ws.emitNotificationCreated(payload);
       },
     );
 
