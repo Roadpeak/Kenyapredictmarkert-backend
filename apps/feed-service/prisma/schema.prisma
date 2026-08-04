@@ -1,0 +1,28 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/feed-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("FEED_DATABASE_URL")
+}
+
+/// A single row in a user's activity timeline (trade placed, deposit
+/// received, market settled, ...). Previously kept in an in-memory Map —
+/// wiped on every service restart, so a user's whole history could vanish
+/// with no warning. Capped per user at query time, not storage time, so
+/// nothing is silently discarded before it's even written.
+model FeedItem {
+  id         String   @id @default(cuid())
+  userId     String
+  type       String
+  title      String
+  body       String
+  metadata   Json
+  occurredAt DateTime @default(now())
+
+  @@index([userId, occurredAt])
+  @@map("feed_items")
+}

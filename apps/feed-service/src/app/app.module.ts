@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { HttpModule } from '@nestjs/axios';
 import { FeedController } from '../feed/feed.controller';
 import { FeedService } from '../feed/feed.service';
+import { PrismaService } from '../feed/prisma.service';
 import { KafkaService } from '@org/kafka-client';
 import { JwtAuthGuard } from '@org/decorators';
 
@@ -13,6 +14,7 @@ import { JwtAuthGuard } from '@org/decorators';
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     FeedService,
+    PrismaService,
     {
       provide: KafkaService,
       useFactory: (config: ConfigService) =>

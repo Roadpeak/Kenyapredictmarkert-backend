@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { of, throwError } from 'rxjs';
 import { AxiosHeaders, AxiosResponse } from 'axios';
-import { FeedService, FeedItem } from './feed.service';
+import { FeedService } from './feed.service';
+import { PrismaService } from './prisma.service';
 import { KafkaService } from '@org/kafka-client';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
@@ -19,9 +20,28 @@ const mockConfig = {
   get: jest.fn((key: string, def?: string) => def ?? 'http://localhost:3003'),
 };
 
+const mockPrisma = {
+  feedItem: {
+    create: jest.fn(),
+    findMany: jest.fn(),
+    count: jest.fn(),
+  },
+};
+
 function axiosOk<T>(data: T): AxiosResponse<T> {
   return { data, status: 200, statusText: 'OK', headers: {}, config: { headers: new AxiosHeaders() } };
 }
+
+const makeFeedRow = (overrides = {}) => ({
+  id: 'feed-1',
+  userId: 'user-1',
+  type: 'TRADE_CONFIRMED',
+  title: 'Trade Placed',
+  body: 'You bought 10 YES shares',
+  metadata: {},
+  occurredAt: new Date(),
+  ...overrides,
+});
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +57,7 @@ describe('FeedService', () => {
         { provide: KafkaService, useValue: mockKafka },
         { provide: HttpService, useValue: mockHttp },
         { provide: ConfigService, useValue: mockConfig },
+        { provide: PrismaService, useValue: mockPrisma },
       ],
     }).compile();
 
@@ -46,18 +67,41 @@ describe('FeedService', () => {
   // ── getUserFeed ─────────────────────────────────────────────────────────────
 
   describe('getUserFeed', () => {
-    it('returns empty feed for user with no items, shaped as Paginated<ActivityItem>', () => {
-      const result = service.getUserFeed('user-nobody', 1, 20);
+    it('returns empty feed for user with no items, shaped as Paginated<ActivityItem>', async () => {
+      mockPrisma.feedItem.findMany.mockResolvedValue([]);
+      mockPrisma.feedItem.count.mockResolvedValue(0);
+
+      const result = await service.getUserFeed('user-nobody', 1, 20);
       expect(result).toEqual({ data: [], total: 0, page: 1, limit: 20 });
     });
 
-    it('returns correct page slice', () => {
-      const result = service.getUserFeed('user-paged', 1, 3);
-      expect(result).toMatchObject({ data: expect.any(Array), total: 0, page: 1, limit: 3 });
+    it('reads from a real table now, not an in-memory Map — previously a service restart wiped every user\'s entire history', async () => {
+      mockPrisma.feedItem.findMany.mockResolvedValue([
+        makeFeedRow({ metadata: { marketId: 'market-1', outcome: 'YES', amountKes: 100 } }),
+      ]);
+      mockPrisma.feedItem.count.mockResolvedValue(1);
+
+      const result = await service.getUserFeed('user-1', 1, 20);
+
+      expect(mockPrisma.feedItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { userId: 'user-1' }, orderBy: { occurredAt: 'desc' } }),
+      );
+      expect(result.data[0]).toMatchObject({
+        type: 'TRADE_CONFIRMED',
+        marketId: 'market-1',
+        payload: expect.objectContaining({ outcome: 'YES', amountKes: 100 }),
+      });
     });
 
-    it('paginates correctly', () => {
-      expect(service.getUserFeed('any', 1, 10)).toMatchObject({ page: 1, limit: 10 });
+    it('paginates via skip/take, not an in-process array slice', async () => {
+      mockPrisma.feedItem.findMany.mockResolvedValue([]);
+      mockPrisma.feedItem.count.mockResolvedValue(0);
+
+      await service.getUserFeed('user-1', 3, 10);
+
+      expect(mockPrisma.feedItem.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({ skip: 20, take: 10 }),
+      );
     });
   });
 
@@ -102,7 +146,7 @@ describe('FeedService', () => {
       expect(groups).toContain('feed-market-resolved-group');
     });
 
-    it('adds trade event to user feed via subscriber callback', async () => {
+    it('persists a trade-confirmed event to the feed table via the subscriber callback', async () => {
       let tradeCallback: ((_topic: string, payload: any) => Promise<void>) | null = null;
 
       (mockKafka.subscribe as jest.Mock).mockImplementation(
@@ -115,9 +159,9 @@ describe('FeedService', () => {
       );
 
       await service.onModuleInit();
-
       expect(tradeCallback).not.toBeNull();
 
+      mockPrisma.feedItem.create.mockResolvedValue({});
       await tradeCallback!('topic', {
         tradeId: 'trade-abc',
         userId: 'user-feed-test',
@@ -129,16 +173,18 @@ describe('FeedService', () => {
         pricePerShare: 0.6,
       });
 
-      const feed = service.getUserFeed('user-feed-test', 1, 20);
-      expect(feed.total).toBe(1);
-      expect(feed.data[0]).toMatchObject({
-        type: 'TRADE_CONFIRMED',
-        marketId: 'market-1',
-        payload: expect.objectContaining({ outcome: 'YES', sharesCount: 10, amountKes: 1000 }),
-      });
+      expect(mockPrisma.feedItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            userId: 'user-feed-test',
+            type: 'TRADE_CONFIRMED',
+            metadata: expect.objectContaining({ marketId: 'market-1', outcome: 'YES', sharesCount: 10 }),
+          }),
+        }),
+      );
     });
 
-    it('caps feed at 50 items per user', async () => {
+    it('does not throw when the write fails — a feed-persistence hiccup must not break the Kafka consumer', async () => {
       let tradeCallback: ((_topic: string, payload: any) => Promise<void>) | null = null;
 
       (mockKafka.subscribe as jest.Mock).mockImplementation(
@@ -151,64 +197,56 @@ describe('FeedService', () => {
       );
 
       await service.onModuleInit();
+      mockPrisma.feedItem.create.mockRejectedValue(new Error('DB error'));
 
-      // Add 55 items
-      for (let i = 0; i < 55; i++) {
-        await tradeCallback!('topic', {
-          tradeId: `trade-cap-${i}`,
-          userId: 'user-cap-test',
+      await expect(
+        tradeCallback!('topic', {
+          tradeId: 'trade-fail',
+          userId: 'user-1',
           marketId: 'market-1',
-          marketTitle: 'Cap test',
+          marketTitle: 'Test',
           outcome: 'YES',
           sharesCount: 1,
           amountKes: 100,
           pricePerShare: 0.6,
-        });
-      }
-
-      const feed = service.getUserFeed('user-cap-test', 1, 100);
-      expect(feed.total).toBe(50);
+        }),
+      ).resolves.toBeUndefined();
     });
 
-    it('most recent item appears first (unshift)', async () => {
-      let tradeCallback: ((_topic: string, payload: any) => Promise<void>) | null = null;
+    it('persists a market-settlement event with the won flag and payout', async () => {
+      let settleCallback: ((_topic: string, payload: any) => Promise<void>) | null = null;
 
       (mockKafka.subscribe as jest.Mock).mockImplementation(
         (group: string, _topics: string[], callback: Function) => {
-          if (group === 'feed-trade-confirmed-group') {
-            tradeCallback = callback as any;
+          if (group === 'feed-settlement-group') {
+            settleCallback = callback as any;
           }
           return Promise.resolve();
         },
       );
 
       await service.onModuleInit();
+      mockPrisma.feedItem.create.mockResolvedValue({});
 
-      await tradeCallback!('topic', {
-        tradeId: 'first-trade',
-        userId: 'user-order-test',
+      await settleCallback!('topic', {
         marketId: 'market-1',
-        marketTitle: 'Order test',
+        marketTitle: 'Test Market',
+        winningOutcome: 'YES',
+        userId: 'user-1',
         outcome: 'YES',
-        sharesCount: 1,
-        amountKes: 100,
-        pricePerShare: 0.6,
+        payoutKes: 500,
+        sharesHeld: 50,
       });
 
-      await tradeCallback!('topic', {
-        tradeId: 'second-trade',
-        userId: 'user-order-test',
-        marketId: 'market-1',
-        marketTitle: 'Order test',
-        outcome: 'NO',
-        sharesCount: 2,
-        amountKes: 200,
-        pricePerShare: 0.4,
-      });
-
-      const feed = service.getUserFeed('user-order-test', 1, 20);
-      expect(feed.data[0].payload).toMatchObject({ outcome: 'NO', amountKes: 200 });
-      expect(feed.data[1].payload).toMatchObject({ outcome: 'YES', amountKes: 100 });
+      expect(mockPrisma.feedItem.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            type: 'MARKET_SETTLED',
+            title: 'You Won!',
+            metadata: expect.objectContaining({ payoutKes: 500, won: true }),
+          }),
+        }),
+      );
     });
   });
 });
