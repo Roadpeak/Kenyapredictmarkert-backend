@@ -37,6 +37,23 @@ export class TradingController {
     return this.tradingService.getMyPositions(user.sub);
   }
 
+  @Get('trades/me/positions/options')
+  @ApiOperation({ summary: 'Current open positions across all multi-outcome markets' })
+  getMyOptionPositions(@CurrentUser() user: JwtPayload) {
+    return this.tradingService.getMyOptionPositions(user.sub);
+  }
+
+  @Get('trades/me/options')
+  @ApiOperation({ summary: 'Own multi-outcome market trade history' })
+  getMyOptionTrades(
+    @CurrentUser() user: JwtPayload,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+    @Query('marketId') marketId?: string,
+  ) {
+    return this.tradingService.getMyOptionTrades(user.sub, +page, +limit, marketId);
+  }
+
   // ─── MULTI markets (pick-a-winner) ──────────────────────────────────────────
 
   @Public()
@@ -60,6 +77,12 @@ export class TradingController {
   @ApiOperation({ summary: 'Position in a specific market' })
   getMarketPosition(@CurrentUser() user: JwtPayload, @Param('marketId') marketId: string) {
     return this.tradingService.getMarketPosition(user.sub, marketId);
+  }
+
+  @Get('trades/me/positions/:marketId/options')
+  @ApiOperation({ summary: 'Own positions in a specific multi-outcome market' })
+  getMarketOptionPositions(@CurrentUser() user: JwtPayload, @Param('marketId') marketId: string) {
+    return this.tradingService.getMarketOptionPositions(user.sub, marketId);
   }
 
   @Public()

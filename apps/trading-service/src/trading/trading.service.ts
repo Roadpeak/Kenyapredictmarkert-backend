@@ -293,8 +293,59 @@ export class TradingService {
     return { data: trades, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 
+  /**
+   * Own MULTI-market trade history. Kept as a separate call (rather than
+   * merged into getMyTrades) because the two live in different tables with
+   * different columns — merging them into one paginated, date-sorted list
+   * would mean fetching both in full and re-paginating in memory.
+   */
+  async getMyOptionTrades(userId: string, page = 1, limit = 20, marketId?: string) {
+    const skip = (page - 1) * limit;
+    const where: any = { userId };
+    if (marketId) where.marketId = marketId;
+
+    const [trades, total] = await Promise.all([
+      this.prisma.optionTrade.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.optionTrade.count({ where }),
+    ]);
+
+    return { data: trades, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+  }
+
   async getMarketTrades(marketId: string, page = 1, limit = 20) {
     const skip = (page - 1) * limit;
+
+    // A MULTI market's trades live in optionTrade, not trade — detect it by
+    // whether this marketId has any option pools rather than calling out to
+    // market-service just to read marketType.
+    const hasOptions = (await this.prisma.optionPool.count({ where: { marketId } })) > 0;
+
+    if (hasOptions) {
+      const [trades, total] = await Promise.all([
+        this.prisma.optionTrade.findMany({
+          where: { marketId, status: 'CONFIRMED' },
+          skip,
+          take: limit,
+          orderBy: { createdAt: 'desc' },
+          select: {
+            label: true,
+            amountKes: true,
+            pricePerShare: true,
+            createdAt: true,
+            // No userId — privacy
+          },
+        }),
+        this.prisma.optionTrade.count({ where: { marketId } }),
+      ]);
+
+      return { data: trades, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
+    }
+
     const [trades, total] = await Promise.all([
       this.prisma.trade.findMany({
         where: { marketId, status: 'CONFIRMED' },
@@ -525,6 +576,87 @@ export class TradingService {
   }
 
   /** Live prices for one MULTI market — each option's share of the pot. */
+  /**
+   * All of the caller's MULTI-market positions across every market — the
+   * pick-a-winner equivalent of getMyPositions.
+   */
+  async getMyOptionPositions(userId: string) {
+    const positions = await this.prisma.optionPosition.findMany({
+      where: { userId, isSettled: false },
+      orderBy: { updatedAt: 'desc' },
+    });
+    if (positions.length === 0) return [];
+
+    const marketIds = [...new Set(positions.map((p) => p.marketId))];
+    const pools = await this.prisma.optionPool.findMany({ where: { marketId: { in: marketIds } } });
+    const totalsByMarket = new Map<string, number>();
+    for (const p of pools) {
+      totalsByMarket.set(p.marketId, (totalsByMarket.get(p.marketId) ?? 0) + Number(p.poolKes));
+    }
+    const poolByOption = new Map(pools.map((p) => [p.optionId, p]));
+
+    return positions.map((pos) => {
+      const pool = poolByOption.get(pos.optionId);
+      const total = totalsByMarket.get(pos.marketId) ?? 0;
+      const currentPrice = pool
+        ? total > 0
+          ? Number(pool.poolKes) / total
+          : 1 / (pools.filter((p) => p.marketId === pos.marketId).length || 1)
+        : Number(pos.avgPriceKes);
+
+      const sharesHeld = Number(pos.totalShares);
+      const costKes = Number(pos.totalCostKes);
+      const currentValue = sharesHeld * SHARE_PRICE_KES * currentPrice;
+
+      return {
+        marketId: pos.marketId,
+        optionId: pos.optionId,
+        label: pos.label,
+        sharesHeld,
+        costKes,
+        currentPrice,
+        currentValue,
+        unrealizedPnl: currentValue - costKes,
+      };
+    });
+  }
+
+  /**
+   * The caller's positions in a MULTI market — one row per option they hold,
+   * unlike binary's single net position, since a user can back more than one
+   * runner in a pick-a-winner market.
+   */
+  async getMarketOptionPositions(userId: string, marketId: string) {
+    const positions = await this.prisma.optionPosition.findMany({
+      where: { userId, marketId, isSettled: false },
+    });
+    if (positions.length === 0) return [];
+
+    const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
+    const total = pools.reduce((sum, p) => sum + Number(p.poolKes), 0);
+    const priceMap = new Map(
+      pools.map((p) => [p.optionId, total > 0 ? Number(p.poolKes) / total : 1 / (pools.length || 1)]),
+    );
+
+    return positions.map((pos) => {
+      const currentPrice = priceMap.get(pos.optionId) ?? Number(pos.avgPriceKes);
+      const sharesHeld = Number(pos.totalShares);
+      const costKes = Number(pos.totalCostKes);
+      const currentValue = sharesHeld * SHARE_PRICE_KES * currentPrice;
+
+      return {
+        marketId,
+        optionId: pos.optionId,
+        label: pos.label,
+        sharesHeld,
+        costKes,
+        currentPrice,
+        currentValue,
+        unrealizedPnl: currentValue - costKes,
+      };
+    });
+  }
+
   async getOptionPrices(marketId: string) {
     const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
     const total = pools.reduce((sum, p) => sum + Number(p.poolKes), 0);
