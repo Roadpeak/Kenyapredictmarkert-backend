@@ -95,7 +95,25 @@ export class NotificationService {
       }),
     ]);
 
-    return { notifications, total, unreadCount, page, limit };
+    // Shaped to match the frontend's Paginated<AppNotification> — {data,
+    // total} with {id, type, title, body, isRead, createdAt} per row — not
+    // this service's raw Prisma row shape ({notifications, status, sentAt}),
+    // which the frontend never actually read (the bell/list rendered empty
+    // despite real notifications existing).
+    return {
+      data: notifications.map((n) => ({
+        id: n.id,
+        type: n.type,
+        title: n.title,
+        body: n.body,
+        isRead: n.status === NotificationStatus.READ,
+        createdAt: n.createdAt.toISOString(),
+      })),
+      total,
+      unreadCount,
+      page,
+      limit,
+    };
   }
 
   async markRead(userId: string, notificationId: string): Promise<void> {

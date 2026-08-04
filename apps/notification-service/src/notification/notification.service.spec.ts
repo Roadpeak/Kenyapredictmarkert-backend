@@ -238,7 +238,7 @@ describe('NotificationService', () => {
   // ── getForUser ──────────────────────────────────────────────────────────────
 
   describe('getForUser', () => {
-    it('returns paginated notifications with unreadCount', async () => {
+    it('returns paginated notifications shaped as Paginated<AppNotification> — previously this returned {notifications}, which the frontend never read, so the bell/list always rendered empty', async () => {
       mockPrisma.notification.findMany.mockResolvedValue([makeNotification()]);
       mockPrisma.notification.count
         .mockResolvedValueOnce(5)   // total
@@ -246,12 +246,26 @@ describe('NotificationService', () => {
 
       const result = await service.getForUser('user-1', 1, 20);
       expect(result).toMatchObject({
-        notifications: expect.any(Array),
+        data: [expect.objectContaining({
+          id: 'notif-1',
+          type: 'TRADE_CONFIRMED',
+          title: 'Trade Confirmed',
+          body: 'You bought 10 YES shares',
+          isRead: false,
+        })],
         total: 5,
         unreadCount: 3,
         page: 1,
         limit: 20,
       });
+    });
+
+    it('maps a READ notification to isRead: true', async () => {
+      mockPrisma.notification.findMany.mockResolvedValue([makeNotification({ status: 'READ' })]);
+      mockPrisma.notification.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      const result = await service.getForUser('user-1', 1, 20);
+      expect(result.data[0].isRead).toBe(true);
     });
 
     it('queries only IN_APP channel', async () => {
