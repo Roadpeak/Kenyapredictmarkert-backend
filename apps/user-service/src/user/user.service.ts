@@ -56,6 +56,23 @@ export class UserService {
     return { ...profile, role };
   }
 
+  // ─── Internal: KYC tier lookup (service-to-service) ──────────────────────────
+
+  /**
+   * kycTier lives here, not in auth-service — auth-service's JWT payload
+   * needs it at login/refresh time to gate KYC-tiered actions (withdrawals),
+   * so it looks this up rather than baking in a stale value.
+   */
+  async getKycTierInternal(userId: string): Promise<number> {
+    const profile = await this.prisma.userProfile.findUnique({
+      where: { id: userId },
+      select: { kycTier: true },
+    });
+    // No profile yet (e.g. mid-registration race) — treat as unverified
+    // rather than failing the login/refresh that's asking.
+    return profile?.kycTier ?? 0;
+  }
+
   // ─── Update own profile ───────────────────────────────────────────────────────
 
   async updateMyProfile(userId: string, dto: { displayName?: string; bio?: string }) {

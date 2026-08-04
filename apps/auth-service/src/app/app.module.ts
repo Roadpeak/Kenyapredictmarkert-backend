@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { HttpModule } from '@nestjs/axios';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { AuthController } from '../auth/auth.controller';
+import { InternalController } from '../auth/internal.controller';
 import { AuthService } from '../auth/auth.service';
 import { PrismaService } from '../auth/prisma.service';
 import { JwtStrategy } from '../common/strategies/jwt.strategy';
@@ -11,6 +13,7 @@ import { KafkaService } from '@org/kafka-client';
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    HttpModule,
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -25,7 +28,7 @@ import { KafkaService } from '@org/kafka-client';
       inject: [ConfigService],
     }),
   ],
-  controllers: [AuthController],
+  controllers: [AuthController, InternalController],
   providers: [
     AuthService,
     PrismaService,

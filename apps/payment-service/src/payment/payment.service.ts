@@ -583,13 +583,14 @@ export class PaymentService {
   private async verifyWithdrawalOtp(userId: string, otp: string) {
     // Delegate OTP check to auth-service
     const authUrl = this.config.get('AUTH_SERVICE_URL', 'http://localhost:3001');
+    const internalKey = this.config.getOrThrow('INTERNAL_API_KEY');
     try {
       await firstValueFrom(
-        this.http.post(`${authUrl}/api/internal/verify-otp`, {
-          userId,
-          otp,
-          purpose: 'WITHDRAWAL_CONFIRM',
-        }),
+        this.http.post(
+          `${authUrl}/api/internal/verify-otp`,
+          { userId, otp, purpose: 'WITHDRAWAL_CONFIRM' },
+          { headers: { 'x-internal-key': internalKey } },
+        ),
       );
     } catch {
       throw new BadRequestException('Invalid or expired OTP');

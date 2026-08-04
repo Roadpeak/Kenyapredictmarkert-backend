@@ -276,6 +276,19 @@ describe('PaymentService', () => {
       await expect(service.initiateWithdrawal('user-1', 1, dto as any)).rejects.toThrow(BadRequestException);
     });
 
+    it('sends the internal API key when verifying OTP with auth-service', async () => {
+      // Regression check: this call must carry x-internal-key or auth-service's
+      // internal route rejects it with 401, which the catch block here turns
+      // into "Invalid or expired OTP" — a confusing failure mode that looks
+      // like a user error but is actually a missing header.
+      await service.initiateWithdrawal('user-1', 1, dto as any);
+
+      const [url, body, config] = mockHttp.post.mock.calls[0];
+      expect(url).toContain('/internal/verify-otp');
+      expect(body).toMatchObject({ userId: 'user-1', otp: '123456', purpose: 'WITHDRAWAL_CONFIRM' });
+      expect(config).toMatchObject({ headers: { 'x-internal-key': expect.anything() } });
+    });
+
     it('throws BadRequestException when wallet reserve fails (insufficient funds)', async () => {
       mockHttp.post
         .mockReturnValueOnce(of(axiosOk({ success: true }))) // OTP ok

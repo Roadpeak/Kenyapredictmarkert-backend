@@ -5,6 +5,7 @@ import { InjectRedis } from '@nestjs-modules/ioredis';
 import Redis from 'ioredis';
 import { firstValueFrom } from 'rxjs';
 import { format } from 'date-fns';
+import { publicEncrypt, constants } from 'crypto';
 import {
   DarajaTokenResponse,
   StkPushRequest,
@@ -159,7 +160,7 @@ export class MpesaService {
     const token = await this.getAccessToken();
     const shortCode = this.config.getOrThrow<string>('MPESA_SHORT_CODE');
     const initiatorName = this.config.getOrThrow<string>('MPESA_B2C_INITIATOR_NAME');
-    const securityCredential = this.config.getOrThrow<string>('MPESA_B2C_SECURITY_CREDENTIAL');
+    const securityCredential = this.getSecurityCredential();
     const env = this.config.get('MPESA_ENVIRONMENT', 'sandbox');
 
     const baseUrl = env === 'production'
@@ -195,6 +196,49 @@ export class MpesaService {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`B2C transfer failed: ${msg}`);
       throw new InternalServerErrorException('Failed to initiate M-Pesa withdrawal');
+    }
+  }
+
+  // ─── B2C SecurityCredential ───────────────────────────────────────────────────
+
+  /**
+   * Daraja's SecurityCredential is the B2C initiator password RSA-encrypted
+   * (PKCS#1 v1.5) with Safaricom's public certificate, base64-encoded — not
+   * the password itself. Sandbox and production use different certificates,
+   * so this must be computed per environment rather than hardcoded.
+   *
+   * MPESA_B2C_SECURITY_CREDENTIAL, if set, is used as-is (an already-encrypted
+   * value, e.g. computed by an external tool). Otherwise it's derived from
+   * MPESA_B2C_INITIATOR_PASSWORD + MPESA_B2C_CERTIFICATE, which is the path
+   * devops should use — it's the plaintext initiator password Safaricom
+   * issued, not a value that has to be pre-computed correctly by hand.
+   *
+   * Certificates: https://developer.safaricom.co.ke/Documentation
+   * (Daraja API → Security Credential → download the cert for sandbox or
+   * production and paste its PEM content, same \n-escaping as JWT_PUBLIC_KEY).
+   */
+  private getSecurityCredential(): string {
+    const precomputed = this.config.get<string>('MPESA_B2C_SECURITY_CREDENTIAL');
+    if (precomputed) return precomputed;
+
+    const password = this.config.getOrThrow<string>('MPESA_B2C_INITIATOR_PASSWORD');
+    const certPem = (this.config.getOrThrow<string>('MPESA_B2C_CERTIFICATE') ?? '').replace(
+      /\\n/g,
+      '\n',
+    );
+
+    try {
+      const encrypted = publicEncrypt(
+        { key: certPem, padding: constants.RSA_PKCS1_PADDING },
+        Buffer.from(password),
+      );
+      return encrypted.toString('base64');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to encrypt B2C security credential: ${msg}`);
+      throw new InternalServerErrorException(
+        'M-Pesa B2C is misconfigured — check MPESA_B2C_CERTIFICATE',
+      );
     }
   }
 

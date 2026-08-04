@@ -2,6 +2,9 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { ConflictException, UnauthorizedException, BadRequestException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { HttpService } from '@nestjs/axios';
+import { of, throwError } from 'rxjs';
+import { AxiosHeaders, AxiosResponse } from 'axios';
 import { AuthService } from './auth.service';
 import { PrismaService } from './prisma.service';
 import { KafkaService } from '@org/kafka-client';
@@ -34,6 +37,11 @@ const mockPrisma = {
 const mockJwt = { sign: jest.fn().mockReturnValue('signed-access-token') };
 const mockConfig = { get: jest.fn((key: string, def?: string) => def ?? 'development') };
 const mockKafka = { publish: jest.fn().mockResolvedValue(undefined) };
+const mockHttp = { get: jest.fn() };
+
+function axiosResponse<T>(data: T): AxiosResponse<T> {
+  return { data, status: 200, statusText: 'OK', headers: {}, config: { headers: new AxiosHeaders() } };
+}
 
 jest.mock('@org/utils', () => ({
   normalizePhone: jest.fn((p: string) => p.replace(/^0/, '254')),
@@ -87,6 +95,10 @@ describe('AuthService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    // issueTokens looks up kycTier from user-service on every login/refresh;
+    // default to a successful 0 so existing assertions (which predate that
+    // lookup) keep seeing the same JWT payload they always did.
+    mockHttp.get.mockReturnValue(of(axiosResponse({ kycTier: 0 })));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -95,6 +107,7 @@ describe('AuthService', () => {
         { provide: JwtService, useValue: mockJwt },
         { provide: ConfigService, useValue: mockConfig },
         { provide: KafkaService, useValue: mockKafka },
+        { provide: HttpService, useValue: mockHttp },
       ],
     }).compile();
 
@@ -233,6 +246,33 @@ describe('AuthService', () => {
         expect.objectContaining({
           data: expect.objectContaining({ ipAddress: '1.2.3.4', userAgent: 'TestBrowser/1.0' }),
         }),
+      );
+    });
+
+    it('stamps the JWT with the KYC tier looked up from user-service', async () => {
+      mockHttp.get.mockReturnValue(of(axiosResponse({ kycTier: 2 })));
+
+      await service.login(dto);
+
+      expect(mockHttp.get).toHaveBeenCalledWith(
+        expect.stringContaining('/internal/users/user-1/kyc-tier'),
+        expect.objectContaining({ headers: expect.objectContaining({ 'x-internal-key': expect.anything() }) }),
+      );
+      expect(mockJwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ kycTier: 2 }),
+        expect.anything(),
+      );
+    });
+
+    it('falls back to kycTier 0 rather than failing login when user-service is unreachable', async () => {
+      mockHttp.get.mockReturnValue(throwError(() => new Error('connect ECONNREFUSED')));
+
+      const result = await service.login(dto);
+
+      expect(result.accessToken).toBeDefined();
+      expect(mockJwt.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ kycTier: 0 }),
+        expect.anything(),
       );
     });
   });
