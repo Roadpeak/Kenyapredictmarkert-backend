@@ -157,9 +157,13 @@ export class AuthService {
       // Resend OTP silently
       const otp = await this.createOtp(user.id, OtpPurpose.PHONE_VERIFY);
       await this.dispatchOtp(phone, otp, 'Your KenyaPolymarket verification code');
-      throw new BadRequestException(
-        'Phone not verified. A new OTP has been sent to your phone.',
-      );
+      // `code` lets the frontend route straight to the OTP field instead of
+      // just toasting the message — matching on message text would break
+      // silently on the next copy edit.
+      throw new BadRequestException({
+        message: 'Phone not verified. A new OTP has been sent to your phone.',
+        code: 'PHONE_NOT_VERIFIED',
+      });
     }
 
     const tokens = await this.issueTokens(user.id, user.phone, user.role as Role, {

@@ -291,6 +291,30 @@ describe('AuthService', () => {
       await expect(service.login(dto)).rejects.toThrow(BadRequestException);
     });
 
+    it('tags the not-verified error with a code the frontend can route on', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(makeUser({ isVerified: false }));
+      mockPrisma.otpCode.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.otpCode.create.mockResolvedValue(makeOtp());
+
+      try {
+        await service.login(dto);
+        fail('expected login to throw');
+      } catch (err) {
+        expect(err).toBeInstanceOf(BadRequestException);
+        const response = (err as BadRequestException).getResponse();
+        expect(response).toMatchObject({ code: 'PHONE_NOT_VERIFIED' });
+      }
+    });
+
+    it('resends the OTP as part of the not-verified rejection, not just the error', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(makeUser({ isVerified: false }));
+      mockPrisma.otpCode.updateMany.mockResolvedValue({ count: 0 });
+      mockPrisma.otpCode.create.mockResolvedValue(makeOtp());
+
+      await expect(service.login(dto)).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.otpCode.create).toHaveBeenCalledTimes(1);
+    });
+
     it('stores session with ipAddress and userAgent', async () => {
       await service.login(dto, '1.2.3.4', 'TestBrowser/1.0');
       expect(mockPrisma.session.create).toHaveBeenCalledWith(
