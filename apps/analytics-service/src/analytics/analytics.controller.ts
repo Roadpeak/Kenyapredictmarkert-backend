@@ -39,6 +39,20 @@ export class AnalyticsController {
     return this.analyticsService.getPlatformOverview(days);
   }
 
+  // ─── Payouts / Platform Earnings ──────────────────────────────────────────
+
+  @Get('payouts')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] Winnings paid out and platform earnings (rake) per settled market' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  getPayoutsOverview(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+  ) {
+    return this.analyticsService.getPayoutsOverview(page, limit);
+  }
+
   // ─── Market Stats ─────────────────────────────────────────────────────────
 
   @Get('markets/:id/stats')

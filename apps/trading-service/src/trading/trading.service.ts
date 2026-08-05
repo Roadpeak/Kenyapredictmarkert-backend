@@ -899,14 +899,21 @@ export class TradingService {
     }
 
     // Losing positions are settled with a zero payout so they stop showing as open.
+    const losers = await this.prisma.optionPosition.findMany({
+      where: { marketId, optionId: { not: winningOptionId }, isSettled: false },
+    });
     await this.prisma.optionPosition.updateMany({
       where: { marketId, optionId: { not: winningOptionId }, isSettled: false },
       data: { isSettled: true, payoutKes: 0 },
     });
 
     // wallet-service credits the payout off this event, same as the binary path.
-    await this.kafka.publishBatch(
-      settlements.map((s) => ({
+    // Losers are fanned out too (payoutKes: 0) — previously only winners
+    // published here, so a losing MULTI position never told its owner the
+    // market had resolved, and analytics' settlement totals only ever saw
+    // the winning side, making platform-earnings math come out negative.
+    await this.kafka.publishBatch([
+      ...settlements.map((s) => ({
         topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
         key: s.userId,
         payload: {
@@ -918,10 +925,22 @@ export class TradingService {
           payoutKes: s.payoutKes,
         },
       })),
-    );
+      ...losers.map((p) => ({
+        topic: KAFKA_TOPICS.TRADING_MARKET_SETTLED,
+        key: p.userId,
+        payload: {
+          marketId,
+          marketTitle: marketId,
+          winningOutcome: winningLabel,
+          userId: p.userId,
+          outcome: p.label,
+          payoutKes: 0,
+        },
+      })),
+    ]);
 
     this.logger.log(
-      `MULTI market ${marketId} settled — ${winners.length} winning positions, pot ${totalPot}`,
+      `MULTI market ${marketId} settled — ${winners.length} winning positions, ${losers.length} losing positions, pot ${totalPot}`,
     );
   }
 

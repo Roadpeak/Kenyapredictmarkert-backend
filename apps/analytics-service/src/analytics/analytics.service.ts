@@ -4,7 +4,7 @@ import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
-import type { TradeConfirmedPayload, MarketSettledPayload } from '@org/types';
+import type { TradeConfirmedPayload, MarketSettledPayload, MarketResolvedPayload } from '@org/types';
 import { PrismaService } from './prisma.service';
 
 // ─── Raw query row types ──────────────────────────────────────────────────────
@@ -44,6 +44,14 @@ export class AnalyticsService implements OnModuleInit {
       [KAFKA_TOPICS.TRADING_MARKET_SETTLED],
       async (_topic, payload) => {
         await this.handleMarketSettled(payload);
+      },
+    );
+
+    await this.kafka.subscribe<MarketResolvedPayload>(
+      'analytics-market-resolved-group',
+      [KAFKA_TOPICS.MARKET_RESOLVED],
+      async (_topic, payload) => {
+        await this.handleMarketResolved(payload);
       },
     );
 
@@ -103,6 +111,36 @@ export class AnalyticsService implements OnModuleInit {
     } catch (err: unknown) {
       this.logger.error(
         `Failed to record SettlementEvent marketId=${marketId} userId=${userId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  // Fires once per resolved market (not per settled position), so this is
+  // the platform's fee for that market — totalPoolKes * rake — taken
+  // straight from calcPayoutPerShare's own formula, independent of how the
+  // pot split between winners/losers or how much of it was house-seeded.
+  private async handleMarketResolved(payload: MarketResolvedPayload): Promise<void> {
+    const { marketId, marketTitle, totalPoolKes, rake, resolvedAt } = payload;
+    const earningsKes = totalPoolKes * rake;
+
+    try {
+      await this.prisma.marketEarnings.upsert({
+        where: { marketId },
+        update: {},
+        create: {
+          marketId,
+          marketTitle: marketTitle ?? marketId,
+          totalPoolKes,
+          rake,
+          earningsKes,
+          resolvedAt: new Date(resolvedAt),
+        },
+      });
+
+      this.logger.debug(`MarketEarnings recorded: marketId=${marketId} earningsKes=${earningsKes}`);
+    } catch (err: unknown) {
+      this.logger.error(
+        `Failed to record MarketEarnings marketId=${marketId}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
@@ -307,6 +345,91 @@ export class AnalyticsService implements OnModuleInit {
         volumeKes: Number(m._sum.amountKes ?? 0),
         tradeCount: m._count._all,
       })),
+    };
+  }
+
+  // ─── Payouts / Platform Earnings ───────────────────────────────────────────
+
+  // Platform earnings come from MarketEarnings (totalPoolKes * rake, recorded
+  // once per market off MARKET_RESOLVED) — NOT from staked-minus-paid-out on
+  // settlement_events, which would count house seed liquidity as a "loss"
+  // since it funds part of every payout but was never staked by a user.
+  async getPayoutsOverview(page = 1, limit = 20): Promise<{
+    totalPayoutsKes: number;
+    totalStakedKes: number;
+    totalPlatformEarningsKes: number;
+    settledMarketCount: number;
+    markets: {
+      data: Array<{
+        marketId: string;
+        marketTitle: string;
+        stakedKes: number;
+        payoutsKes: number;
+        platformEarningsKes: number;
+        winnerCount: number;
+        loserCount: number;
+        settledAt: string;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+    };
+  }> {
+    const skip = (page - 1) * limit;
+
+    const [earningsTotals, settlementTotals, marketCount, earningsPage, settlementByMarket] = await Promise.all([
+      this.prisma.marketEarnings.aggregate({ _sum: { earningsKes: true } }),
+      this.prisma.settlementEvent.aggregate({ _sum: { payoutKes: true, costKes: true } }),
+      this.prisma.marketEarnings.count(),
+      this.prisma.marketEarnings.findMany({
+        orderBy: { resolvedAt: 'desc' },
+        skip,
+        take: limit,
+      }),
+      this.prisma.$queryRaw<
+        Array<{
+          market_id: string;
+          staked_kes: string;
+          payouts_kes: string;
+          winner_count: bigint;
+          loser_count: bigint;
+        }>
+      >`
+        SELECT "marketId"                     AS market_id,
+               SUM("costKes")                  AS staked_kes,
+               SUM("payoutKes")                AS payouts_kes,
+               COUNT(*) FILTER (WHERE won)      AS winner_count,
+               COUNT(*) FILTER (WHERE NOT won)  AS loser_count
+        FROM settlement_events
+        GROUP BY "marketId"
+      `,
+    ]);
+
+    const settlementByMarketId = new Map(settlementByMarket.map((s) => [s.market_id, s]));
+
+    return {
+      totalPayoutsKes: Number(settlementTotals._sum.payoutKes ?? 0),
+      totalStakedKes: Number(settlementTotals._sum.costKes ?? 0),
+      totalPlatformEarningsKes: Number(earningsTotals._sum.earningsKes ?? 0),
+      settledMarketCount: marketCount,
+      markets: {
+        data: earningsPage.map((m) => {
+          const s = settlementByMarketId.get(m.marketId);
+          return {
+            marketId: m.marketId,
+            marketTitle: m.marketTitle,
+            stakedKes: s ? Number(s.staked_kes) : 0,
+            payoutsKes: s ? Number(s.payouts_kes) : 0,
+            platformEarningsKes: Number(m.earningsKes),
+            winnerCount: s ? Number(s.winner_count) : 0,
+            loserCount: s ? Number(s.loser_count) : 0,
+            settledAt: m.resolvedAt.toISOString(),
+          };
+        }),
+        total: marketCount,
+        page,
+        limit,
+      },
     };
   }
 

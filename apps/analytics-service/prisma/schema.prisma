@@ -41,6 +41,23 @@ model SettlementEvent {
   @@map("settlement_events")
 }
 
+/// One row per resolved market — the platform's fee for that market, taken
+/// directly from MARKET_RESOLVED (totalPoolKes * rake) rather than
+/// reconstructed from per-user settlement rows, which include seed
+/// liquidity the house contributes and would otherwise show as a "loss".
+model MarketEarnings {
+  id             String   @id @default(cuid())
+  marketId       String   @unique
+  marketTitle    String
+  totalPoolKes   Decimal  @db.Decimal(15, 2)
+  rake           Decimal  @db.Decimal(4, 3)
+  earningsKes    Decimal  @db.Decimal(15, 2)
+  resolvedAt     DateTime
+
+  @@index([resolvedAt])
+  @@map("market_earnings")
+}
+
 model LeaderboardEntry {
   id           String   @id @default(cuid())
   userId       String

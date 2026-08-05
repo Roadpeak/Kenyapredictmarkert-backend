@@ -722,9 +722,9 @@ describe('TradingService', () => {
         { optionId: 'opt-a', label: 'A', poolKes: 1000, rake: 0.04 },
         { optionId: 'opt-b', label: 'B', poolKes: 1000, rake: 0.04 },
       ]);
-      mockPrisma.optionPosition.findMany.mockResolvedValue([
-        { id: 'pos-1', userId: 'user-1', totalShares: 10 },
-      ]);
+      mockPrisma.optionPosition.findMany
+        .mockResolvedValueOnce([{ id: 'pos-1', userId: 'user-1', totalShares: 10 }]) // winners
+        .mockResolvedValueOnce([{ id: 'pos-2', userId: 'user-2', totalShares: 5, label: 'B' }]); // losers
 
       await service.settleOptionMarket('market-1', 'opt-a');
 
@@ -733,6 +733,26 @@ describe('TradingService', () => {
           where: expect.objectContaining({ optionId: { not: 'opt-a' }, isSettled: false }),
           data: { isSettled: true, payoutKes: 0 },
         }),
+      );
+    });
+
+    it('fans out TRADING_MARKET_SETTLED to losing positions too — previously only winners were published, so a losing MULTI position never learned the market had resolved', async () => {
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'A', poolKes: 1000, rake: 0.04 },
+        { optionId: 'opt-b', label: 'B', poolKes: 1000, rake: 0.04 },
+      ]);
+      mockPrisma.optionPosition.findMany
+        .mockResolvedValueOnce([{ id: 'pos-1', userId: 'user-1', totalShares: 10 }]) // winners
+        .mockResolvedValueOnce([{ id: 'pos-2', userId: 'user-2', totalShares: 5, label: 'B' }]); // losers
+
+      await service.settleOptionMarket('market-1', 'opt-a');
+
+      expect(mockKafka.publishBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({ userId: 'user-2', payoutKes: 0, outcome: 'B' }),
+          }),
+        ]),
       );
     });
   });

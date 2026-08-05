@@ -19,6 +19,14 @@ const mockPrisma = {
   settlementEvent: {
     upsert: jest.fn(),
     findMany: jest.fn(),
+    aggregate: jest.fn(),
+    groupBy: jest.fn(),
+  },
+  marketEarnings: {
+    upsert: jest.fn(),
+    aggregate: jest.fn(),
+    count: jest.fn(),
+    findMany: jest.fn(),
   },
   leaderboardEntry: {
     findMany: jest.fn(),
@@ -158,6 +166,43 @@ describe('AnalyticsService', () => {
     });
   });
 
+  // ── handleMarketResolved ────────────────────────────────────────────────────
+
+  describe('handleMarketResolved (via direct call)', () => {
+    const resolvedPayload = {
+      marketId: 'market-1',
+      marketTitle: 'Test Market',
+      outcome: 'YES',
+      totalPoolKes: 10000,
+      rake: 0.04,
+      resolvedAt: '2026-08-05T00:00:00.000Z',
+    };
+
+    it('records MarketEarnings as totalPoolKes * rake, independent of how the pot was staked', async () => {
+      mockPrisma.marketEarnings.upsert.mockResolvedValue({});
+
+      await (service as any).handleMarketResolved(resolvedPayload);
+
+      expect(mockPrisma.marketEarnings.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { marketId: 'market-1' },
+          create: expect.objectContaining({
+            marketId: 'market-1',
+            marketTitle: 'Test Market',
+            totalPoolKes: 10000,
+            rake: 0.04,
+            earningsKes: 400,
+          }),
+        }),
+      );
+    });
+
+    it('does not throw when the upsert fails', async () => {
+      mockPrisma.marketEarnings.upsert.mockRejectedValue(new Error('DB error'));
+      await expect((service as any).handleMarketResolved(resolvedPayload)).resolves.toBeUndefined();
+    });
+  });
+
   // ── getLeaderboard ──────────────────────────────────────────────────────────
 
   describe('getLeaderboard', () => {
@@ -287,6 +332,93 @@ describe('AnalyticsService', () => {
 
       const result = await service.getUserStats('user-1');
       expect(result).toMatchObject({ totalTrades: 0, totalPnlKes: 0, winRate: 0 });
+    });
+  });
+
+  // ── getPayoutsOverview ──────────────────────────────────────────────────────
+
+  describe('getPayoutsOverview', () => {
+    it('sources platform earnings from MarketEarnings (totalPoolKes * rake), not staked-minus-paid-out — seed liquidity funds part of every payout without being a "loss"', async () => {
+      mockPrisma.marketEarnings.aggregate.mockResolvedValue({ _sum: { earningsKes: 400 } });
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: 9600, costKes: 8000 } });
+      mockPrisma.marketEarnings.count.mockResolvedValue(1);
+      mockPrisma.marketEarnings.findMany.mockResolvedValue([
+        {
+          marketId: 'market-1',
+          marketTitle: 'Test Market',
+          totalPoolKes: 10000,
+          rake: 0.04,
+          earningsKes: 400,
+          resolvedAt: new Date('2026-08-01T00:00:00.000Z'),
+        },
+      ]);
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { market_id: 'market-1', staked_kes: '8000', payouts_kes: '9600', winner_count: 3n, loser_count: 5n },
+      ]);
+
+      const result = await service.getPayoutsOverview(1, 20);
+
+      expect(result).toMatchObject({
+        totalPayoutsKes: 9600,
+        totalStakedKes: 8000,
+        totalPlatformEarningsKes: 400,
+        settledMarketCount: 1,
+      });
+      expect(result.markets.data[0]).toMatchObject({
+        marketId: 'market-1',
+        marketTitle: 'Test Market',
+        stakedKes: 8000,
+        payoutsKes: 9600,
+        platformEarningsKes: 400,
+        winnerCount: 3,
+        loserCount: 5,
+      });
+    });
+
+    it('returns zeros when nothing has settled yet', async () => {
+      mockPrisma.marketEarnings.aggregate.mockResolvedValue({ _sum: { earningsKes: null } });
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: null, costKes: null } });
+      mockPrisma.marketEarnings.count.mockResolvedValue(0);
+      mockPrisma.marketEarnings.findMany.mockResolvedValue([]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+
+      const result = await service.getPayoutsOverview(1, 20);
+
+      expect(result).toMatchObject({
+        totalPayoutsKes: 0,
+        totalStakedKes: 0,
+        totalPlatformEarningsKes: 0,
+        settledMarketCount: 0,
+      });
+      expect(result.markets.data).toEqual([]);
+    });
+
+    it('defaults staked/payouts/winner/loser to 0 for a market with earnings but no settlement rows joined yet', async () => {
+      mockPrisma.marketEarnings.aggregate.mockResolvedValue({ _sum: { earningsKes: 40 } });
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: null, costKes: null } });
+      mockPrisma.marketEarnings.count.mockResolvedValue(1);
+      mockPrisma.marketEarnings.findMany.mockResolvedValue([
+        {
+          marketId: 'market-2',
+          marketTitle: 'Pending Join',
+          totalPoolKes: 1000,
+          rake: 0.04,
+          earningsKes: 40,
+          resolvedAt: new Date('2026-08-01T00:00:00.000Z'),
+        },
+      ]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+
+      const result = await service.getPayoutsOverview(1, 20);
+
+      expect(result.markets.data[0]).toMatchObject({
+        marketId: 'market-2',
+        stakedKes: 0,
+        payoutsKes: 0,
+        platformEarningsKes: 40,
+        winnerCount: 0,
+        loserCount: 0,
+      });
     });
   });
 
