@@ -26,15 +26,15 @@ export class NotificationService {
   // ─── Kafka event handlers ──────────────────────────────────────────────────
 
   async onTradeConfirmed(payload: TradeConfirmedPayload): Promise<void> {
-    const { userId, outcome, sharesCount, amountKes, marketTitle } = payload;
+    const { userId, marketId, outcome, sharesCount, amountKes, marketTitle } = payload;
 
     const body = `You bought ${sharesCount} ${outcome} share${sharesCount !== 1 ? 's' : ''} on "${marketTitle}" for KES ${amountKes.toLocaleString()}`;
 
-    await this.createAndSend(userId, NotificationType.TRADE_CONFIRMED, 'Trade Confirmed', body);
+    await this.createAndSend(userId, NotificationType.TRADE_CONFIRMED, 'Trade Confirmed', body, { marketId });
   }
 
   async onMarketSettled(payload: MarketSettledPayload): Promise<void> {
-    const { userId, outcome, payoutKes, marketTitle, winningOutcome } = payload;
+    const { userId, marketId, outcome, payoutKes, marketTitle, winningOutcome } = payload;
 
     const won = outcome === winningOutcome;
     const title = won ? 'You Won!' : 'Market Resolved';
@@ -42,7 +42,7 @@ export class NotificationService {
       ? `Congratulations! You won KES ${payoutKes.toLocaleString()} on "${marketTitle}"`
       : `The market "${marketTitle}" resolved as ${winningOutcome}. Better luck next time!`;
 
-    await this.createAndSend(userId, NotificationType.TRADE_SETTLED, title, body);
+    await this.createAndSend(userId, NotificationType.TRADE_SETTLED, title, body, { marketId });
   }
 
   async onDepositCompleted(payload: DepositCompletedPayload): Promise<void> {
@@ -106,6 +106,7 @@ export class NotificationService {
         type: n.type,
         title: n.title,
         body: n.body,
+        data: n.data ?? undefined,
         isRead: n.status === NotificationStatus.READ,
         createdAt: n.createdAt.toISOString(),
       })),
@@ -151,6 +152,7 @@ export class NotificationService {
     type: NotificationType,
     title: string,
     body: string,
+    data?: Record<string, unknown>,
   ): Promise<void> {
     // Persist in-app notification
     const notification = await this.prisma.notification.create({
@@ -162,6 +164,7 @@ export class NotificationService {
         body,
         status: NotificationStatus.SENT,
         sentAt: new Date(),
+        data: data ?? undefined,
       },
     });
 
@@ -173,6 +176,7 @@ export class NotificationService {
       type,
       title,
       body,
+      data: data ?? undefined,
       createdAt: notification.createdAt.toISOString(),
     });
 

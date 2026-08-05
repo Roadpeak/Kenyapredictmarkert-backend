@@ -290,6 +290,31 @@ describe('MarketService', () => {
     });
   });
 
+  // ── getMarketsBatch ─────────────────────────────────────────────────────────
+
+  describe('getMarketsBatch', () => {
+    it('returns id/title/slug for the requested markets', async () => {
+      mockPrisma.market.findMany.mockResolvedValue([
+        { id: 'market-1', title: 'Who wins the Ballon d\'Or?', slug: 'who-wins-ballon-dor' },
+        { id: 'market-2', title: 'Will BTC hit 100k?', slug: 'will-btc-hit-100k' },
+      ]);
+
+      const result = await service.getMarketsBatch(['market-1', 'market-2']);
+
+      expect(mockPrisma.market.findMany).toHaveBeenCalledWith({
+        where: { id: { in: ['market-1', 'market-2'] } },
+        select: { id: true, title: true, slug: true },
+      });
+      expect(result).toHaveLength(2);
+    });
+
+    it('returns an empty array without querying when given no ids', async () => {
+      const result = await service.getMarketsBatch([]);
+      expect(result).toEqual([]);
+      expect(mockPrisma.market.findMany).not.toHaveBeenCalled();
+    });
+  });
+
   // ── createMarket ────────────────────────────────────────────────────────────
 
   describe('createMarket', () => {

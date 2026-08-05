@@ -456,16 +456,29 @@ describe('TradingService', () => {
   // ── getMyPositions ──────────────────────────────────────────────────────────
 
   describe('getMyPositions', () => {
-    it('enriches positions with current price and P&L', async () => {
+    it('enriches positions with current price, P&L, and the resolved market title', async () => {
       mockPrisma.position.findMany.mockResolvedValue([makePosition()]);
       mockPrisma.marketPool.findMany.mockResolvedValue([makePool()]);
+      mockHttp.get.mockReturnValue(
+        of(axiosResponse([{ id: 'market-1', title: "Will it rain tomorrow?" }])),
+      );
 
       const result = await service.getMyPositions('user-1');
       expect(result[0]).toMatchObject({
+        marketTitle: "Will it rain tomorrow?",
         currentPrice: expect.any(Number),
         currentValue: expect.any(Number),
         unrealizedPnl: expect.any(Number),
       });
+    });
+
+    it('falls back to the raw marketId when market-service is unreachable — previously this field was missing entirely, showing blank in the UI', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([makePosition()]);
+      mockPrisma.marketPool.findMany.mockResolvedValue([makePool()]);
+      mockHttp.get.mockReturnValue(throwError(() => new Error('Connection refused')));
+
+      const result = await service.getMyPositions('user-1');
+      expect(result[0].marketTitle).toBe(result[0].marketId);
     });
 
     it('returns empty array when no open positions', async () => {
@@ -474,6 +487,75 @@ describe('TradingService', () => {
 
       const result = await service.getMyPositions('user-1');
       expect(result).toEqual([]);
+    });
+  });
+
+  // ── getMyResults ─────────────────────────────────────────────────────────────
+
+  describe('getMyResults', () => {
+    it('merges settled binary and option positions, newest first, with resolved market titles — previously settled positions were unreachable from any endpoint', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({
+          id: 'pos-1', marketId: 'market-1', outcome: 'YES', isSettled: true,
+          payoutKes: 960, totalCostKes: 500, totalShares: 100,
+          updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+        }),
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        {
+          id: 'opos-1', marketId: 'market-2', optionId: 'opt-a', label: 'Haaland',
+          isSettled: true, payoutKes: 0, totalCostKes: 300, totalShares: 30,
+          updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+        },
+      ]);
+      mockHttp.get.mockReturnValue(
+        of(axiosResponse([
+          { id: 'market-1', title: 'Will it rain tomorrow?' },
+          { id: 'market-2', title: "Who wins the Ballon d'Or?" },
+        ])),
+      );
+
+      const result = await service.getMyResults('user-1', 1, 20);
+
+      expect(result.total).toBe(2);
+      // Newest settlement first: market-2 settled 2026-08-02, market-1 on 08-01.
+      expect(result.data[0]).toMatchObject({
+        marketId: 'market-2',
+        marketTitle: "Who wins the Ballon d'Or?",
+        label: 'Haaland',
+        payoutKes: 0,
+        won: false,
+      });
+      expect(result.data[1]).toMatchObject({
+        marketId: 'market-1',
+        marketTitle: 'Will it rain tomorrow?',
+        label: 'YES',
+        payoutKes: 960,
+        won: true,
+      });
+    });
+
+    it('paginates the merged, sorted results', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ id: 'pos-1', marketId: 'm1', isSettled: true, payoutKes: 100, updatedAt: new Date('2026-08-01') }),
+        makePosition({ id: 'pos-2', marketId: 'm2', isSettled: true, payoutKes: 0, updatedAt: new Date('2026-08-02') }),
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+      mockHttp.get.mockReturnValue(of(axiosResponse([])));
+
+      const result = await service.getMyResults('user-1', 1, 1);
+
+      expect(result.total).toBe(2);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].marketId).toBe('m2');
+    });
+
+    it('returns empty when nothing has settled yet', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+
+      const result = await service.getMyResults('user-1', 1, 20);
+      expect(result).toEqual({ data: [], total: 0, page: 1, limit: 20 });
     });
   });
 
@@ -752,6 +834,44 @@ describe('TradingService', () => {
           expect.objectContaining({
             payload: expect.objectContaining({ userId: 'user-2', payoutKes: 0, outcome: 'B' }),
           }),
+        ]),
+      );
+    });
+
+    it('publishes the real market title, not the raw marketId — previously every MULTI settlement notification showed the id string instead of a readable title', async () => {
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'A', poolKes: 1000, rake: 0.04 },
+        { optionId: 'opt-b', label: 'B', poolKes: 1000, rake: 0.04 },
+      ]);
+      mockPrisma.optionPosition.findMany
+        .mockResolvedValueOnce([{ id: 'pos-1', userId: 'user-1', totalShares: 10 }])
+        .mockResolvedValueOnce([]);
+
+      await service.settleOptionMarket('market-1', 'opt-a', 'Who wins the Ballon d\'Or?');
+
+      expect(mockKafka.publishBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({
+            payload: expect.objectContaining({ marketTitle: 'Who wins the Ballon d\'Or?' }),
+          }),
+        ]),
+      );
+    });
+
+    it('falls back to marketId when no title is passed', async () => {
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'A', poolKes: 1000, rake: 0.04 },
+        { optionId: 'opt-b', label: 'B', poolKes: 1000, rake: 0.04 },
+      ]);
+      mockPrisma.optionPosition.findMany
+        .mockResolvedValueOnce([{ id: 'pos-1', userId: 'user-1', totalShares: 10 }])
+        .mockResolvedValueOnce([]);
+
+      await service.settleOptionMarket('market-1', 'opt-a');
+
+      expect(mockKafka.publishBatch).toHaveBeenCalledWith(
+        expect.arrayContaining([
+          expect.objectContaining({ payload: expect.objectContaining({ marketTitle: 'market-1' }) }),
         ]),
       );
     });

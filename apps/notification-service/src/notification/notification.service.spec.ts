@@ -103,6 +103,12 @@ describe('NotificationService', () => {
       expect(call.data.body).toContain('Will it rain?');
     });
 
+    it('stores marketId in the notification metadata — previously nothing did, so a notification could never link back to its market', async () => {
+      await service.onTradeConfirmed(payload as any);
+      const call = mockPrisma.notification.create.mock.calls[0][0];
+      expect(call.data.data).toEqual({ marketId: 'market-1' });
+    });
+
     it('dispatches push notification when device tokens exist', async () => {
       mockPrisma.deviceToken.findMany.mockResolvedValue([{ token: 'fcm-token-1' }]);
       await service.onTradeConfirmed(payload as any);
@@ -144,6 +150,14 @@ describe('NotificationService', () => {
       const call = mockPrisma.notification.create.mock.calls[0][0];
       expect(call.data.title).toBe('Market Resolved');
       expect(call.data.body).toContain('YES');
+    });
+
+    it('stores marketId in the notification metadata — previously a "You Won!" notification had no way to link back to which market', async () => {
+      await service.onMarketSettled({
+        userId: 'user-1', marketId: 'm-1', marketTitle: 'Test', outcome: 'YES', winningOutcome: 'YES', payoutKes: 1500, sharesHeld: 100,
+      } as any);
+      const call = mockPrisma.notification.create.mock.calls[0][0];
+      expect(call.data.data).toEqual({ marketId: 'm-1' });
     });
   });
 
@@ -266,6 +280,16 @@ describe('NotificationService', () => {
 
       const result = await service.getForUser('user-1', 1, 20);
       expect(result.data[0].isRead).toBe(true);
+    });
+
+    it('includes the data field so the frontend can navigate to the relevant market — previously this was dropped entirely', async () => {
+      mockPrisma.notification.findMany.mockResolvedValue([
+        makeNotification({ data: { marketId: 'market-1' } }),
+      ]);
+      mockPrisma.notification.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+
+      const result = await service.getForUser('user-1', 1, 20);
+      expect(result.data[0].data).toEqual({ marketId: 'market-1' });
     });
 
     it('queries only IN_APP channel', async () => {

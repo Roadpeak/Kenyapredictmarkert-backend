@@ -202,6 +202,7 @@ export interface NotificationCreatedPayload {
   type: NotificationType;
   title: string;
   body: string;
+  data?: Record<string, unknown>;
   createdAt: string;
 }
 

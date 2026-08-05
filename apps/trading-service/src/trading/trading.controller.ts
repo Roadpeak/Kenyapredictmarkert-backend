@@ -43,6 +43,16 @@ export class TradingController {
     return this.tradingService.getMyOptionPositions(user.sub);
   }
 
+  @Get('trades/me/results')
+  @ApiOperation({ summary: 'Settled positions (won or lost) across binary and multi-outcome markets' })
+  getMyResults(
+    @CurrentUser() user: JwtPayload,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.tradingService.getMyResults(user.sub, +page, +limit);
+  }
+
   @Get('trades/me/options')
   @ApiOperation({ summary: 'Own multi-outcome market trade history' })
   getMyOptionTrades(

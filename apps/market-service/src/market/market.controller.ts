@@ -28,6 +28,14 @@ export class MarketController {
   }
 
   @Public()
+  @Get('markets/batch')
+  @ApiOperation({ summary: 'Get id/title/slug for a set of markets — for services that only store a marketId and need it resolved for display' })
+  getMarketsBatch(@Query('ids') ids: string) {
+    const marketIds = (ids ?? '').split(',').map((id) => id.trim()).filter(Boolean);
+    return this.marketService.getMarketsBatch(marketIds);
+  }
+
+  @Public()
   @Get('markets/:idOrSlug')
   @ApiOperation({ summary: 'Get market by id or slug' })
   getMarket(@Param('idOrSlug') idOrSlug: string) {

@@ -130,6 +130,17 @@ export class MarketService {
     });
   }
 
+  // ─── Batch lookup (for other services resolving a marketId to a title) ────────
+
+  async getMarketsBatch(marketIds: string[]) {
+    if (marketIds.length === 0) return [];
+    const markets = await this.prisma.market.findMany({
+      where: { id: { in: marketIds } },
+      select: { id: true, title: true, slug: true },
+    });
+    return markets;
+  }
+
   // ─── Price history ────────────────────────────────────────────────────────────
 
   async getPriceHistory(marketId: string, hours = 24) {

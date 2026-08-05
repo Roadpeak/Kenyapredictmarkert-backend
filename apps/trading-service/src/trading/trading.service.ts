@@ -207,9 +207,10 @@ export class TradingService {
 
     // Enrich with current pool prices
     const marketIds = [...new Set(positions.map((p) => p.marketId))];
-    const pools = await this.prisma.marketPool.findMany({
-      where: { marketId: { in: marketIds } },
-    });
+    const [pools, titles] = await Promise.all([
+      this.prisma.marketPool.findMany({ where: { marketId: { in: marketIds } } }),
+      this.resolveMarketTitles(marketIds),
+    ]);
 
     const poolMap = new Map(pools.map((p) => [p.marketId, p]));
 
@@ -227,6 +228,7 @@ export class TradingService {
 
       return {
         ...pos,
+        marketTitle: titles.get(pos.marketId) ?? pos.marketId,
         currentPrice,
         currentValue,
         costBasis,
@@ -234,6 +236,52 @@ export class TradingService {
         unrealizedPnlPct: costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0,
       };
     });
+  }
+
+  /**
+   * Settled positions (won or lost) across both binary and MULTI markets —
+   * the counterpart to getMyPositions/getMyOptionPositions, which both
+   * explicitly filter isSettled: false. Without this there was nowhere a
+   * user could see a past result: the market title, whether they won, and
+   * what they were paid.
+   */
+  async getMyResults(userId: string, page: number, limit: number) {
+    const [binary, options] = await Promise.all([
+      this.prisma.position.findMany({ where: { userId, isSettled: true } }),
+      this.prisma.optionPosition.findMany({ where: { userId, isSettled: true } }),
+    ]);
+
+    const marketIds = [...new Set([...binary.map((p) => p.marketId), ...options.map((p) => p.marketId)])];
+    const titles = await this.resolveMarketTitles(marketIds);
+
+    const results = [
+      ...binary.map((p) => ({
+        marketId: p.marketId,
+        marketTitle: titles.get(p.marketId) ?? p.marketId,
+        label: p.outcome,
+        sharesHeld: Number(p.totalShares),
+        costKes: Number(p.totalCostKes),
+        payoutKes: Number(p.payoutKes ?? 0),
+        won: Number(p.payoutKes ?? 0) > 0,
+        settledAt: p.updatedAt.toISOString(),
+      })),
+      ...options.map((p) => ({
+        marketId: p.marketId,
+        marketTitle: titles.get(p.marketId) ?? p.marketId,
+        label: p.label,
+        sharesHeld: Number(p.totalShares),
+        costKes: Number(p.totalCostKes),
+        payoutKes: Number(p.payoutKes ?? 0),
+        won: Number(p.payoutKes ?? 0) > 0,
+        settledAt: p.updatedAt.toISOString(),
+      })),
+    ].sort((a, b) => new Date(b.settledAt).getTime() - new Date(a.settledAt).getTime());
+
+    const total = results.length;
+    const start = (page - 1) * limit;
+    const data = results.slice(start, start + limit);
+
+    return { data, total, page, limit };
   }
 
   /**
@@ -509,7 +557,7 @@ export class TradingService {
       [KAFKA_TOPICS.MARKET_RESOLVED],
       async (_topic, payload) => {
         if (payload.marketType === 'MULTI' && payload.winningOptionId) {
-          await this.settleOptionMarket(payload.marketId, payload.winningOptionId);
+          await this.settleOptionMarket(payload.marketId, payload.winningOptionId, payload.marketTitle);
           return;
         }
         await this.settleMarket(payload);
@@ -866,7 +914,7 @@ export class TradingService {
    * across all options, net of rake. Losing options' stakes fund the payout,
    * exactly as the binary path works.
    */
-  async settleOptionMarket(marketId: string, winningOptionId: string) {
+  async settleOptionMarket(marketId: string, winningOptionId: string, marketTitle?: string) {
     const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
     if (pools.length === 0) return;
 
@@ -918,7 +966,7 @@ export class TradingService {
         key: s.userId,
         payload: {
           marketId,
-          marketTitle: marketId,
+          marketTitle: marketTitle ?? marketId,
           winningOutcome: winningLabel,
           userId: s.userId,
           outcome: winningLabel,
@@ -930,7 +978,7 @@ export class TradingService {
         key: p.userId,
         payload: {
           marketId,
-          marketTitle: marketId,
+          marketTitle: marketTitle ?? marketId,
           winningOutcome: winningLabel,
           userId: p.userId,
           outcome: p.label,
@@ -1030,6 +1078,29 @@ export class TradingService {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.error(`Failed to release reserve for user ${userId}: ${msg}`);
+    }
+  }
+
+  // Batch-resolves marketId -> title via market-service's /markets/batch —
+  // trading-service doesn't own market data, so every place that surfaces a
+  // position or trade to a user needs this rather than showing the raw id.
+  private async resolveMarketTitles(marketIds: string[]): Promise<Map<string, string>> {
+    const uniqueIds = [...new Set(marketIds)];
+    if (uniqueIds.length === 0) return new Map();
+
+    const marketUrl = this.config.get('MARKET_SERVICE_URL', 'http://localhost:3003');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<Array<{ id: string; title: string }>>(
+          `${marketUrl}/api/markets/batch`,
+          { params: { ids: uniqueIds.join(',') } },
+        ),
+      );
+      return new Map(response.data.map((m) => [m.id, m.title]));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to resolve market titles: ${msg}`);
+      return new Map();
     }
   }
 
