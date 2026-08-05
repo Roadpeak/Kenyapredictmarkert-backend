@@ -468,14 +468,30 @@ export class MarketService {
       },
     });
 
+    const yesPrice = calcYesPrice(poolYesKes, poolNoKes);
+    const noPrice = calcNoPrice(poolYesKes, poolNoKes);
+
     // Record price snapshot
     await this.prisma.priceSnapshot.create({
       data: {
         marketId,
-        yesPrice: calcYesPrice(poolYesKes, poolNoKes),
-        noPrice: calcNoPrice(poolYesKes, poolNoKes),
+        yesPrice,
+        noPrice,
         volume: volumeDelta,
       },
+    });
+
+    // Tells the gateway to push a live tick over the market:price WebSocket
+    // room — without this, useMarketLivePrice on the frontend never fires
+    // and a market's odds only ever update on the viewer's next page load.
+    await this.kafka.publish(KAFKA_TOPICS.MARKET_POOL_UPDATED, {
+      marketId,
+      yesPrice,
+      noPrice,
+      poolYesKes,
+      poolNoKes,
+      totalVolume: Number(market.totalVolume),
+      tradeCount: market.tradeCount,
     });
 
     return market;
@@ -486,6 +502,12 @@ export class MarketService {
    * option's live pool, this just mirrors it into market-service's copy
    * (what GET /markets/:id actually serves) and snapshots every option's
    * price for the history chart.
+   *
+   * Unlike the binary path, this does not publish a live WebSocket tick —
+   * no frontend hook subscribes to one yet (MULTI markets currently poll
+   * via React Query instead). Add a MARKET_OPTION_POOL_UPDATED publish +
+   * gateway emit + frontend hook here if live MULTI odds become a
+   * requirement; today it would be dead infrastructure.
    */
   async updateOptionPoolStats(
     marketId: string,

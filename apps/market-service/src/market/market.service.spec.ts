@@ -456,5 +456,25 @@ describe('MarketService', () => {
       );
       expect(mockPrisma.priceSnapshot.create).toHaveBeenCalled();
     });
+
+    it('publishes MARKET_POOL_UPDATED so the gateway can push a live tick — previously nothing published this topic at all, so the frontend\'s "Live" price indicator never fired', async () => {
+      mockPrisma.market.update.mockResolvedValue(makeMarket({ poolYesKes: 1500, poolNoKes: 1000, totalVolume: 2500, tradeCount: 12 }));
+      mockPrisma.priceSnapshot.create.mockResolvedValue({});
+
+      await service.updatePoolStats('market-1', 1500, 1000, 500);
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('pool-updated'),
+        expect.objectContaining({
+          marketId: 'market-1',
+          poolYesKes: 1500,
+          poolNoKes: 1000,
+          yesPrice: expect.any(Number),
+          noPrice: expect.any(Number),
+          totalVolume: 2500,
+          tradeCount: 12,
+        }),
+      );
+    });
   });
 });
