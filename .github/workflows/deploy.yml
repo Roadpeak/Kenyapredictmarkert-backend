@@ -132,6 +132,7 @@ jobs:
             PAYMENT_DATABASE_URL=${PGBASE}/payment_db?schema=public
             NOTIFICATION_DATABASE_URL=${PGBASE}/notification_db?schema=public
             ANALYTICS_DATABASE_URL=${PGBASE}/analytics_db?schema=public
+            FEED_DATABASE_URL=${PGBASE}/feed_db?schema=public
             AUTH_SERVICE_URL=http://auth-service:3001
             USER_SERVICE_URL=http://user-service:3002
             MARKET_SERVICE_URL=http://market-service:3003
