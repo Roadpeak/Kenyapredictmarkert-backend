@@ -133,6 +133,34 @@ describe('AdminService', () => {
     });
   });
 
+  // ── closeMarket ─────────────────────────────────────────────────────────────
+
+  describe('closeMarket', () => {
+    it('PUTs to close endpoint', async () => {
+      mockHttp.put.mockReturnValue(of(axiosOk({ status: 'CLOSED' })));
+      await service.closeMarket('market-1', 'admin-token');
+      expect(mockHttp.put).toHaveBeenCalledWith(
+        expect.stringContaining('/market-1/close'),
+        {},
+        expect.anything(),
+      );
+    });
+  });
+
+  // ── updateMarketImage ───────────────────────────────────────────────────────
+
+  describe('updateMarketImage', () => {
+    it('PUTs imageUrl to image endpoint', async () => {
+      mockHttp.put.mockReturnValue(of(axiosOk({ imageUrl: 'https://example.com/x.png' })));
+      await service.updateMarketImage('market-1', 'https://example.com/x.png', 'admin-token');
+      expect(mockHttp.put).toHaveBeenCalledWith(
+        expect.stringContaining('/market-1/image'),
+        { imageUrl: 'https://example.com/x.png' },
+        expect.anything(),
+      );
+    });
+  });
+
   // ── listMarkets ─────────────────────────────────────────────────────────────
 
   describe('listMarkets', () => {

@@ -58,6 +58,20 @@ export class AdminController {
     return this.adminService.cancelMarket(id, extractToken(req));
   }
 
+  @Post('markets/:id/close')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Close a market for trading (ACTIVE → CLOSED)' })
+  closeMarket(@Param('id') id: string, @Req() req: Request) {
+    return this.adminService.closeMarket(id, extractToken(req));
+  }
+
+  @Post('markets/:id/image')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update market image URL' })
+  updateMarketImage(@Param('id') id: string, @Body('imageUrl') imageUrl: string, @Req() req: Request) {
+    return this.adminService.updateMarketImage(id, imageUrl, extractToken(req));
+  }
+
   // ─── KYC ────────────────────────────────────────────────────────────────────
 
   @Get('kyc/pending')

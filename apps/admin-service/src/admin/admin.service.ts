@@ -107,6 +107,14 @@ export class AdminService {
     return this.put(`${this.marketServiceUrl}/api/admin/markets/${marketId}/cancel`, {}, token);
   }
 
+  async closeMarket(marketId: string, token: string) {
+    return this.put(`${this.marketServiceUrl}/api/admin/markets/${marketId}/close`, {}, token);
+  }
+
+  async updateMarketImage(marketId: string, imageUrl: string, token: string) {
+    return this.put(`${this.marketServiceUrl}/api/admin/markets/${marketId}/image`, { imageUrl }, token);
+  }
+
   async listMarkets(status?: string, page = 1, limit = 20, token?: string) {
     const params = new URLSearchParams({ page: String(page), limit: String(limit) });
     if (status) params.set('status', status);

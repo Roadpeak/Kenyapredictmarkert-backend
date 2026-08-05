@@ -316,6 +316,18 @@ export class MarketService {
     return updated;
   }
 
+  // ─── Admin: Update image ──────────────────────────────────────────────────────
+
+  // Only imageUrl is editable post-creation — every other field feeds pricing
+  // or settlement, which real trades may already depend on.
+  async updateMarketImage(marketId: string, imageUrl: string) {
+    await this.findMarketOrThrow(marketId);
+    return this.prisma.market.update({
+      where: { id: marketId },
+      data: { imageUrl },
+    });
+  }
+
   // ─── Admin: Resolve market ────────────────────────────────────────────────────
 
   async resolveMarket(marketId: string, dto: ResolveMarketDto, adminId: string) {

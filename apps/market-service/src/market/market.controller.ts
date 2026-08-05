@@ -76,6 +76,15 @@ export class MarketController {
     return this.marketService.closeMarket(id);
   }
 
+  @Put('admin/markets/:id/image')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: '[Admin] Update market image URL' })
+  updateMarketImage(@Param('id') id: string, @Body('imageUrl') imageUrl: string) {
+    return this.marketService.updateMarketImage(id, imageUrl);
+  }
+
   @Put('admin/markets/:id/resolve')
   @ApiBearerAuth()
   @Roles(Role.ADMIN, Role.SUPER_ADMIN)

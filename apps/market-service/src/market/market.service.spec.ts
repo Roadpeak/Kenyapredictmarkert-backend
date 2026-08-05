@@ -373,6 +373,28 @@ describe('MarketService', () => {
     });
   });
 
+  // ── updateMarketImage ───────────────────────────────────────────────────────
+
+  describe('updateMarketImage', () => {
+    it('updates imageUrl regardless of market status', async () => {
+      mockPrisma.market.findUnique.mockResolvedValue(makeMarket({ status: 'ACTIVE' }));
+      mockPrisma.market.update.mockResolvedValue(makeMarket({ imageUrl: 'https://example.com/new.png' }));
+
+      const result = await service.updateMarketImage('market-1', 'https://example.com/new.png');
+
+      expect(mockPrisma.market.update).toHaveBeenCalledWith({
+        where: { id: 'market-1' },
+        data: { imageUrl: 'https://example.com/new.png' },
+      });
+      expect(result.imageUrl).toBe('https://example.com/new.png');
+    });
+
+    it('throws NotFoundException for unknown market', async () => {
+      mockPrisma.market.findUnique.mockResolvedValue(null);
+      await expect(service.updateMarketImage('bad-id', 'https://x.com/y.png')).rejects.toThrow(NotFoundException);
+    });
+  });
+
   // ── resolveMarket ───────────────────────────────────────────────────────────
 
   describe('resolveMarket', () => {
