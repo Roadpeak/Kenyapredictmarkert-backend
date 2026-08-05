@@ -224,6 +224,26 @@ export class AnalyticsService implements OnModuleInit {
     }
   }
 
+  // Analytics only stores marketId on every trade/settlement row — it never
+  // owns titles, so anything surfacing a market to an admin needs this.
+  private async fetchMarketTitles(marketIds: string[]): Promise<Record<string, string>> {
+    if (marketIds.length === 0) return {};
+    const marketServiceUrl = this.config.get('MARKET_SERVICE_URL', 'http://localhost:3003');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<Array<{ id: string; title: string }>>(
+          `${marketServiceUrl}/api/markets/batch`,
+          { params: { ids: marketIds.join(',') } },
+        ),
+      );
+      return Object.fromEntries(response.data.map((m) => [m.id, m.title]));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.warn(`Failed to fetch market titles: ${msg}`);
+      return {};
+    }
+  }
+
   // ─── Market Stats ──────────────────────────────────────────────────────────
 
   /**
@@ -288,7 +308,7 @@ export class AnalyticsService implements OnModuleInit {
     recentTrades: number;
     avgTradeKes: number;
     dailyVolume: Array<{ date: string; volumeKes: number; tradeCount: number }>;
-    topMarkets: Array<{ marketId: string; volumeKes: number; tradeCount: number }>;
+    topMarkets: Array<{ marketId: string; marketTitle: string; volumeKes: number; tradeCount: number }>;
   }> {
     const since = new Date();
     since.setDate(since.getDate() - days);
@@ -327,6 +347,7 @@ export class AnalyticsService implements OnModuleInit {
 
     const totalVolumeKes = Number(lifetime._sum.amountKes ?? 0);
     const totalTrades = lifetime._count._all;
+    const titles = await this.fetchMarketTitles(topMarkets.map((m) => m.marketId));
 
     return {
       totalVolumeKes,
@@ -342,6 +363,7 @@ export class AnalyticsService implements OnModuleInit {
       })),
       topMarkets: topMarkets.map((m) => ({
         marketId: m.marketId,
+        marketTitle: titles[m.marketId] ?? m.marketId,
         volumeKes: Number(m._sum.amountKes ?? 0),
         tradeCount: m._count._all,
       })),

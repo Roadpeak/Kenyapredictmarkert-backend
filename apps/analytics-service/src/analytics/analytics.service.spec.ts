@@ -304,6 +304,67 @@ describe('AnalyticsService', () => {
     });
   });
 
+  // ── getPlatformOverview ─────────────────────────────────────────────────────
+
+  describe('getPlatformOverview', () => {
+    it('resolves marketTitle for each top market — previously topMarkets only had marketId, so the admin dashboard showed raw ids instead of names', async () => {
+      mockPrisma.tradeEvent.aggregate
+        .mockResolvedValueOnce({ _sum: { amountKes: 50000 }, _count: { _all: 100 } }) // lifetime
+        .mockResolvedValueOnce({ _sum: { amountKes: 5000 }, _count: { _all: 10 } }); // recent
+      mockPrisma.tradeEvent.findMany.mockResolvedValue([{ userId: 'u1' }, { userId: 'u2' }]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.tradeEvent.groupBy.mockResolvedValue([
+        { marketId: 'market-1', _sum: { amountKes: 30000 }, _count: { _all: 60 } },
+        { marketId: 'market-2', _sum: { amountKes: 20000 }, _count: { _all: 40 } },
+      ]);
+      mockHttp.get.mockReturnValue(of(axiosOk([
+        { id: 'market-1', title: 'Will BTC hit 100k?' },
+        { id: 'market-2', title: "Who wins the Ballon d'Or?" },
+      ])));
+
+      const result = await service.getPlatformOverview(30);
+
+      expect(mockHttp.get).toHaveBeenCalledWith(
+        expect.stringContaining('/markets/batch'),
+        expect.objectContaining({ params: { ids: 'market-1,market-2' } }),
+      );
+      expect(result.topMarkets).toEqual([
+        { marketId: 'market-1', marketTitle: 'Will BTC hit 100k?', volumeKes: 30000, tradeCount: 60 },
+        { marketId: 'market-2', marketTitle: "Who wins the Ballon d'Or?", volumeKes: 20000, tradeCount: 40 },
+      ]);
+    });
+
+    it('falls back to the raw marketId when market-service is unreachable', async () => {
+      mockPrisma.tradeEvent.aggregate
+        .mockResolvedValueOnce({ _sum: { amountKes: 0 }, _count: { _all: 0 } })
+        .mockResolvedValueOnce({ _sum: { amountKes: 0 }, _count: { _all: 0 } });
+      mockPrisma.tradeEvent.findMany.mockResolvedValue([]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.tradeEvent.groupBy.mockResolvedValue([
+        { marketId: 'market-1', _sum: { amountKes: 100 }, _count: { _all: 1 } },
+      ]);
+      mockHttp.get.mockReturnValue(throwError(() => new Error('Connection refused')));
+
+      const result = await service.getPlatformOverview(30);
+
+      expect(result.topMarkets[0]).toMatchObject({ marketId: 'market-1', marketTitle: 'market-1' });
+    });
+
+    it('does not call market-service when there are no top markets', async () => {
+      mockPrisma.tradeEvent.aggregate
+        .mockResolvedValueOnce({ _sum: { amountKes: 0 }, _count: { _all: 0 } })
+        .mockResolvedValueOnce({ _sum: { amountKes: 0 }, _count: { _all: 0 } });
+      mockPrisma.tradeEvent.findMany.mockResolvedValue([]);
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.tradeEvent.groupBy.mockResolvedValue([]);
+
+      const result = await service.getPlatformOverview(30);
+
+      expect(mockHttp.get).not.toHaveBeenCalled();
+      expect(result.topMarkets).toEqual([]);
+    });
+  });
+
   // ── getUserStats ────────────────────────────────────────────────────────────
 
   describe('getUserStats', () => {
