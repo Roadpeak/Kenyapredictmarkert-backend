@@ -486,6 +486,104 @@ export class AnalyticsService implements OnModuleInit {
     };
   }
 
+  // ─── Winnings & Losses (per user, for admin) ───────────────────────────────
+
+  // The Payouts page groups settlement_events by market; this groups the
+  // same table by user instead — every settled position (won or lost) rolled
+  // up per trader, for an admin view of who's winning, who's losing, and by
+  // how much. Nothing existed at all to answer "how is user X doing" in
+  // aggregate before this — only per-market and per-user-single-lookup views.
+  async getUserSettlementsOverview(page = 1, limit = 20, sort: 'netPnl' | 'wagered' = 'netPnl'): Promise<{
+    totalWageredKes: number;
+    totalWonKes: number;
+    netUserLossKes: number;
+    settledUserCount: number;
+    users: {
+      data: Array<{
+        userId: string;
+        displayName: string;
+        wageredKes: number;
+        wonKes: number;
+        netPnlKes: number;
+        winCount: number;
+        lossCount: number;
+        winRate: number;
+        lastSettledAt: string;
+      }>;
+      total: number;
+      page: number;
+      limit: number;
+    };
+  }> {
+    const skip = (page - 1) * limit;
+
+    // Raw SQL can't safely parametrize an ORDER BY column via a tagged
+    // template, so every user's row comes back unsorted here and the
+    // ranking itself happens in JS below.
+    const [totals, rows] = await Promise.all([
+      this.prisma.settlementEvent.aggregate({ _sum: { payoutKes: true, costKes: true } }),
+      this.prisma.$queryRaw<
+        Array<{
+          user_id: string;
+          wagered_kes: string;
+          won_kes: string;
+          win_count: bigint;
+          loss_count: bigint;
+          last_settled_at: Date;
+        }>
+      >`
+        SELECT "userId"                          AS user_id,
+               SUM("costKes")                      AS wagered_kes,
+               SUM("payoutKes")                     AS won_kes,
+               COUNT(*) FILTER (WHERE won)           AS win_count,
+               COUNT(*) FILTER (WHERE NOT won)       AS loss_count,
+               MAX("settledAt")                      AS last_settled_at
+        FROM settlement_events
+        GROUP BY "userId"
+      `,
+    ]);
+
+    const ranked = rows
+      .map((r) => {
+        const wageredKes = Number(r.wagered_kes);
+        const wonKes = Number(r.won_kes);
+        const winCount = Number(r.win_count);
+        const lossCount = Number(r.loss_count);
+        return {
+          userId: r.user_id,
+          wageredKes,
+          wonKes,
+          netPnlKes: wonKes - wageredKes,
+          winCount,
+          lossCount,
+          winRate: winCount + lossCount > 0 ? winCount / (winCount + lossCount) : 0,
+          lastSettledAt: r.last_settled_at.toISOString(),
+        };
+      })
+      .sort((a, b) =>
+        sort === 'wagered' ? b.wageredKes - a.wageredKes : b.netPnlKes - a.netPnlKes,
+      );
+
+    const page_ = ranked.slice(skip, skip + limit);
+    const displayNames = await this.fetchDisplayNames(page_.map((u) => u.userId));
+
+    return {
+      totalWageredKes: Number(totals._sum.costKes ?? 0),
+      totalWonKes: Number(totals._sum.payoutKes ?? 0),
+      netUserLossKes: Number(totals._sum.costKes ?? 0) - Number(totals._sum.payoutKes ?? 0),
+      settledUserCount: rows.length,
+      users: {
+        data: page_.map((u) => ({
+          ...u,
+          displayName: displayNames[u.userId] ?? 'Trader',
+        })),
+        total: ranked.length,
+        page,
+        limit,
+      },
+    };
+  }
+
   // ─── User Stats ────────────────────────────────────────────────────────────
 
   async getUserStats(userId: string): Promise<{

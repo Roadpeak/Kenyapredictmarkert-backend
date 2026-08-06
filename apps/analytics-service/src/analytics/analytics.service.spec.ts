@@ -527,6 +527,94 @@ describe('AnalyticsService', () => {
     });
   });
 
+  // ── getUserSettlementsOverview ──────────────────────────────────────────────
+
+  describe('getUserSettlementsOverview', () => {
+    beforeEach(() => {
+      mockHttp.get.mockReturnValue(of(axiosOk({ 'user-1': 'Alice', 'user-2': 'Bob' })));
+    });
+
+    it('rolls up winnings and losses per user, ranked by net P&L by default — nothing previously answered "how is user X doing" across all traders', async () => {
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: 3000, costKes: 2500 } });
+      mockPrisma.$queryRaw.mockResolvedValue([
+        {
+          user_id: 'user-1', wagered_kes: '1000', won_kes: '2600',
+          win_count: 3n, loss_count: 1n, last_settled_at: new Date('2026-08-01T00:00:00.000Z'),
+        },
+        {
+          user_id: 'user-2', wagered_kes: '1500', won_kes: '400',
+          win_count: 1n, loss_count: 4n, last_settled_at: new Date('2026-08-02T00:00:00.000Z'),
+        },
+      ]);
+
+      const result = await service.getUserSettlementsOverview(1, 20);
+
+      expect(result).toMatchObject({
+        totalWageredKes: 2500,
+        totalWonKes: 3000,
+        netUserLossKes: -500,
+        settledUserCount: 2,
+      });
+      // user-1 net +1600 ranks above user-2 net -1100, even though user-2
+      // settled more recently and wagered more.
+      expect(result.users.data[0]).toMatchObject({
+        userId: 'user-1', displayName: 'Alice', wageredKes: 1000, wonKes: 2600,
+        netPnlKes: 1600, winCount: 3, lossCount: 1, winRate: 0.75,
+      });
+      expect(result.users.data[1]).toMatchObject({
+        userId: 'user-2', displayName: 'Bob', netPnlKes: -1100, winRate: 0.2,
+      });
+    });
+
+    it('ranks by total wagered instead when sort=wagered', async () => {
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: 3000, costKes: 2500 } });
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'user-1', wagered_kes: '1000', won_kes: '2600', win_count: 3n, loss_count: 1n, last_settled_at: new Date() },
+        { user_id: 'user-2', wagered_kes: '1500', won_kes: '400', win_count: 1n, loss_count: 4n, last_settled_at: new Date() },
+      ]);
+
+      const result = await service.getUserSettlementsOverview(1, 20, 'wagered');
+
+      expect(result.users.data.map((u) => u.userId)).toEqual(['user-2', 'user-1']);
+    });
+
+    it('paginates the ranked results', async () => {
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: 0, costKes: 0 } });
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'a', wagered_kes: '100', won_kes: '300', win_count: 1n, loss_count: 0n, last_settled_at: new Date() },
+        { user_id: 'b', wagered_kes: '100', won_kes: '200', win_count: 1n, loss_count: 0n, last_settled_at: new Date() },
+        { user_id: 'c', wagered_kes: '100', won_kes: '150', win_count: 1n, loss_count: 0n, last_settled_at: new Date() },
+      ]);
+
+      const result = await service.getUserSettlementsOverview(2, 1);
+
+      expect(result.settledUserCount).toBe(3);
+      expect(result.users.total).toBe(3);
+      expect(result.users.data).toHaveLength(1);
+      expect(result.users.data[0].userId).toBe('b');
+    });
+
+    it('gives winRate 0 for a user with only unsettled activity, not a divide-by-zero crash', async () => {
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: 0, costKes: 100 } });
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'user-1', wagered_kes: '100', won_kes: '0', win_count: 0n, loss_count: 0n, last_settled_at: new Date() },
+      ]);
+
+      const result = await service.getUserSettlementsOverview(1, 20);
+      expect(result.users.data[0].winRate).toBe(0);
+    });
+
+    it('returns zeros and no rows when nothing has settled yet', async () => {
+      mockPrisma.settlementEvent.aggregate.mockResolvedValue({ _sum: { payoutKes: null, costKes: null } });
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+
+      const result = await service.getUserSettlementsOverview(1, 20);
+
+      expect(result).toMatchObject({ totalWageredKes: 0, totalWonKes: 0, netUserLossKes: 0, settledUserCount: 0 });
+      expect(result.users.data).toEqual([]);
+    });
+  });
+
   // ── computeLeaderboard ──────────────────────────────────────────────────────
 
   describe('computeLeaderboard', () => {

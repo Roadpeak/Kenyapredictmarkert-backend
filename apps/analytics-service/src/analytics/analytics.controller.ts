@@ -53,6 +53,22 @@ export class AnalyticsController {
     return this.analyticsService.getPayoutsOverview(page, limit);
   }
 
+  // ─── Winnings & Losses (per user) ─────────────────────────────────────────
+
+  @Get('users/settlements')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] Every user\'s settled winnings and losses, ranked by net P&L or total wagered' })
+  @ApiQuery({ name: 'page', required: false, example: 1 })
+  @ApiQuery({ name: 'limit', required: false, example: 20 })
+  @ApiQuery({ name: 'sort', required: false, example: 'netPnl', description: '"netPnl" or "wagered"' })
+  getUserSettlementsOverview(
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+    @Query('limit', new DefaultValuePipe(20), ParseIntPipe) limit: number,
+    @Query('sort') sort: 'netPnl' | 'wagered' = 'netPnl',
+  ) {
+    return this.analyticsService.getUserSettlementsOverview(page, limit, sort);
+  }
+
   // ─── Market Stats ─────────────────────────────────────────────────────────
 
   @Get('markets/:id/stats')
