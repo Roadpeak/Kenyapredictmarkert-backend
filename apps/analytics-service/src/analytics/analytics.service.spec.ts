@@ -210,52 +210,96 @@ describe('AnalyticsService', () => {
       mockHttp.get.mockReturnValue(of(axiosOk({ 'user-1': 'Alice' })));
     });
 
-    it('returns paginated entries with numeric conversion and resolved display names', async () => {
-      mockPrisma.leaderboardEntry.findMany.mockResolvedValue([{
-        rank: 1, userId: 'user-1', pnlKes: 2500, tradeCount: 42, winRate: 0.6,
-      }]);
-      mockPrisma.leaderboardEntry.count.mockResolvedValue(1);
+    it('computes profit and win rate live from trade/settlement records, ranked by pnl — previously this only read an hourly-cron cache that could be stale or missing a trader entirely', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'user-1', volume_kes: '1000', trade_count: '42' },
+      ]);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { userId: 'user-1', won: true, payoutKes: 2600, costKes: 100 },
+        { userId: 'user-1', won: false, payoutKes: 0, costKes: 50 },
+      ]);
 
       const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 20);
 
       expect(result).toMatchObject({
         period: '2026-W23',
         category: 'OVERALL',
-        data: [expect.objectContaining({ rank: 1, userId: 'user-1', displayName: 'Alice', profitKes: 2500, tradeCount: 42, winRate: 0.6 })],
+        data: [expect.objectContaining({
+          rank: 1, userId: 'user-1', displayName: 'Alice',
+          profitKes: 2450, tradeCount: 42, winRate: 0.5,
+        })],
         total: 1,
       });
     });
 
-    it('queries by period and category', async () => {
-      mockPrisma.leaderboardEntry.findMany.mockResolvedValue([]);
-      mockPrisma.leaderboardEntry.count.mockResolvedValue(0);
+    it('ranks by pnl descending regardless of trade_events row order', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'user-lo', volume_kes: '100', trade_count: '1' },
+        { user_id: 'user-hi', volume_kes: '100', trade_count: '1' },
+      ]);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { userId: 'user-lo', won: false, payoutKes: 0, costKes: 100 },
+        { userId: 'user-hi', won: true, payoutKes: 500, costKes: 100 },
+      ]);
 
-      await service.getLeaderboard('2026-W23', 'SPORTS', 1, 10);
+      const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 20);
 
-      expect(mockPrisma.leaderboardEntry.findMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { period: '2026-W23', category: 'SPORTS' } }),
-      );
+      expect(result.data.map((e) => e.userId)).toEqual(['user-hi', 'user-lo']);
+      expect(result.data[0].rank).toBe(1);
+      expect(result.data[1].rank).toBe(2);
     });
 
-    it('resolves a friendly period name ("weekly") to the current stored ISO-week key — previously this never matched any row', async () => {
-      mockPrisma.leaderboardEntry.findMany.mockResolvedValue([]);
-      mockPrisma.leaderboardEntry.count.mockResolvedValue(0);
+    it('resolves a friendly period name ("weekly") to the current ISO-week window — previously the literal string never matched a stored row', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([]);
 
       await service.getLeaderboard('weekly', 'OVERALL', 1, 10);
 
-      const call = mockPrisma.leaderboardEntry.findMany.mock.calls[0][0];
-      expect(call.where.period).toMatch(/^\d{4}-W\d{2}$/);
+      expect(mockPrisma.settlementEvent.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ settledAt: expect.objectContaining({ gte: expect.any(Date), lt: expect.any(Date) }) }),
+        }),
+      );
+    });
+
+    it('paginates the ranked results', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'a', volume_kes: '100', trade_count: '1' },
+        { user_id: 'b', volume_kes: '100', trade_count: '1' },
+        { user_id: 'c', volume_kes: '100', trade_count: '1' },
+      ]);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { userId: 'a', won: true, payoutKes: 300, costKes: 100 },
+        { userId: 'b', won: true, payoutKes: 200, costKes: 100 },
+        { userId: 'c', won: true, payoutKes: 150, costKes: 100 },
+      ]);
+
+      const result = await service.getLeaderboard('2026-W23', 'OVERALL', 2, 1);
+
+      expect(result.total).toBe(3);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0]).toMatchObject({ userId: 'b', rank: 2 });
     });
 
     it('falls back to an empty displayName map when user-service is unreachable, rather than failing the whole request', async () => {
       mockHttp.get.mockReturnValue(throwError(() => new Error('ECONNREFUSED')));
-      mockPrisma.leaderboardEntry.findMany.mockResolvedValue([
-        { rank: 1, userId: 'user-1', pnlKes: 100, tradeCount: 1, winRate: 1 },
+      mockPrisma.$queryRaw.mockResolvedValue([
+        { user_id: 'user-1', volume_kes: '100', trade_count: '1' },
       ]);
-      mockPrisma.leaderboardEntry.count.mockResolvedValue(1);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([
+        { userId: 'user-1', won: true, payoutKes: 100, costKes: 0 },
+      ]);
 
       const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 10);
       expect(result.data[0].displayName).toBe('Trader');
+    });
+
+    it('returns an empty leaderboard when no one has traded in the period', async () => {
+      mockPrisma.$queryRaw.mockResolvedValue([]);
+      mockPrisma.settlementEvent.findMany.mockResolvedValue([]);
+
+      const result = await service.getLeaderboard('2026-W23', 'OVERALL', 1, 20);
+      expect(result).toMatchObject({ data: [], total: 0 });
     });
   });
 

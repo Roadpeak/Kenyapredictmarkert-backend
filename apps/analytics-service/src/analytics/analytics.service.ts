@@ -147,6 +147,13 @@ export class AnalyticsService implements OnModuleInit {
 
   // ─── Leaderboard ───────────────────────────────────────────────────────────
 
+  /**
+   * Computed live from trade/settlement records for the period window, not
+   * read from the LeaderboardEntry cache — that cache only refreshes on an
+   * hourly cron, so a trader's rank and profit could be up to an hour stale,
+   * and anyone who started trading since the last run wouldn't appear at
+   * all. Same live-aggregation pattern as getUserStats/getPlatformOverview.
+   */
   async getLeaderboard(
     period: string,
     category: string,
@@ -166,40 +173,64 @@ export class AnalyticsService implements OnModuleInit {
     total: number;
   }> {
     const skip = (page - 1) * limit;
-    // The frontend sends the friendly name ("weekly"); rows are stored
-    // under the resolved key computeLeaderboard actually writes to
-    // ("2026-W32") — querying by the literal string never matched a row.
     const resolvedPeriod = this.resolvePeriodKey(period);
+    const periodStart = this.periodStart(resolvedPeriod);
+    const periodEnd = this.periodEnd(resolvedPeriod);
 
-    const [entries, total] = await Promise.all([
-      this.prisma.leaderboardEntry.findMany({
-        where: { period: resolvedPeriod, category },
-        orderBy: { pnlKes: 'desc' },
-        skip,
-        take: limit,
-        select: {
-          rank: true,
-          userId: true,
-          pnlKes: true,
-          tradeCount: true,
-          winRate: true,
-        },
+    const [volumeRows, settlements] = await Promise.all([
+      this.prisma.$queryRaw<LeaderboardRow[]>`
+        SELECT
+          "userId"                            AS user_id,
+          COALESCE(SUM("amountKes"), 0)::text  AS volume_kes,
+          COUNT(*)::text                        AS trade_count
+        FROM trade_events
+        WHERE "occurredAt" >= ${periodStart}
+          AND "occurredAt" <  ${periodEnd}
+        GROUP BY "userId"
+      `,
+      this.prisma.settlementEvent.findMany({
+        where: { settledAt: { gte: periodStart, lt: periodEnd } },
+        select: { userId: true, won: true, payoutKes: true, costKes: true },
       }),
-      this.prisma.leaderboardEntry.count({ where: { period: resolvedPeriod, category } }),
     ]);
 
-    const displayNames = await this.fetchDisplayNames(entries.map((e) => e.userId));
+    const settlementsByUser = new Map<string, { won: boolean; payoutKes: number; costKes: number }[]>();
+    for (const s of settlements) {
+      const list = settlementsByUser.get(s.userId) ?? [];
+      list.push({ won: s.won, payoutKes: Number(s.payoutKes), costKes: Number(s.costKes) });
+      settlementsByUser.set(s.userId, list);
+    }
+
+    const ranked = volumeRows
+      .map((row) => {
+        const userSettlements = settlementsByUser.get(row.user_id) ?? [];
+        const pnlKes = userSettlements.reduce((sum, s) => sum + (s.payoutKes - s.costKes), 0);
+        const winRate = userSettlements.length > 0
+          ? userSettlements.filter((s) => s.won).length / userSettlements.length
+          : 0;
+        return {
+          userId: row.user_id,
+          pnlKes,
+          tradeCount: Number(row.trade_count),
+          winRate,
+        };
+      })
+      .sort((a, b) => b.pnlKes - a.pnlKes);
+
+    const total = ranked.length;
+    const page_ = ranked.slice(skip, skip + limit);
+    const displayNames = await this.fetchDisplayNames(page_.map((e) => e.userId));
 
     return {
       period,
       category,
-      data: entries.map((e, i) => ({
-        rank: e.rank ?? skip + i + 1,
+      data: page_.map((e, i) => ({
+        rank: skip + i + 1,
         userId: e.userId,
         displayName: displayNames[e.userId] ?? 'Trader',
-        profitKes: Number(e.pnlKes),
+        profitKes: e.pnlKes,
         tradeCount: e.tradeCount,
-        winRate: Number(e.winRate),
+        winRate: e.winRate,
       })),
       total,
     };
