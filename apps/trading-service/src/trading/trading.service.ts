@@ -1114,6 +1114,13 @@ export class TradingService {
       if (market?.status !== 'ACTIVE') {
         throw new BadRequestException(`Market is not accepting trades (status: ${market?.status})`);
       }
+      // market-service auto-closes past-deadline markets on a 1-minute
+      // cron — this check is the safety net for that window, so a trade
+      // placed in the gap between the deadline passing and the next cron
+      // tick still gets rejected instead of silently going through.
+      if (market.closesAt && new Date(market.closesAt) <= new Date()) {
+        throw new BadRequestException('Market is not accepting trades (past closing time)');
+      }
       return market;
     } catch (err) {
       if (err instanceof BadRequestException) throw err;

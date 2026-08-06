@@ -1,6 +1,7 @@
 import { Module, OnModuleInit } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { MarketController } from '../market/market.controller';
 import { MarketService } from '../market/market.service';
 import { PrismaService } from '../market/prisma.service';
@@ -8,7 +9,7 @@ import { KafkaService } from '@org/kafka-client';
 import { JwtAuthGuard } from '@org/decorators';
 
 @Module({
-  imports: [ConfigModule.forRoot({ isGlobal: true })],
+  imports: [ConfigModule.forRoot({ isGlobal: true }), ScheduleModule.forRoot()],
   controllers: [MarketController],
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },

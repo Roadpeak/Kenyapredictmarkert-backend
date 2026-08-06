@@ -283,6 +283,36 @@ describe('TradingService', () => {
         service.placeTrade('user-1', { marketId: 'bad-id', outcome: 'YES', amountKes: 100, idempotencyKey: 'k2' } as any),
       ).rejects.toThrow(NotFoundException);
     });
+
+    it('throws BadRequestException when the market is ACTIVE but closesAt has already passed — previously nothing enforced this and trades kept going through indefinitely', async () => {
+      mockPrisma.trade.findUnique.mockResolvedValue(null);
+      mockHttp.get.mockReturnValue(
+        of(axiosResponse({ status: 'ACTIVE', id: 'market-1', closesAt: '2020-01-01T00:00:00.000Z' })),
+      );
+      mockHttp.post.mockReturnValue(of(axiosResponse({ success: true })));
+
+      await expect(
+        service.placeTrade('user-1', { marketId: 'market-1', outcome: 'YES', amountKes: 100, idempotencyKey: 'k3' } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('allows the trade when the market is ACTIVE and closesAt is still in the future', async () => {
+      mockPrisma.trade.findUnique.mockResolvedValue(null);
+      mockHttp.get.mockReturnValue(
+        of(axiosResponse({ status: 'ACTIVE', id: 'market-1', closesAt: '2099-01-01T00:00:00.000Z' })),
+      );
+      mockHttp.post.mockReturnValue(of(axiosResponse({ success: true })));
+      mockPrisma.$transaction.mockImplementation(async () => {
+        return [{ ...makePool(), version: 1 }, makeTrade()];
+      });
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+      mockPrisma.position.upsert.mockResolvedValue(makePosition());
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool({ version: 1 }));
+
+      await expect(
+        service.placeTrade('user-1', { marketId: 'market-1', outcome: 'YES', amountKes: 100, idempotencyKey: 'k4' } as any),
+      ).resolves.toMatchObject({ marketId: 'market-1' });
+    });
   });
 
   // ── placeTrade — wallet insufficient ───────────────────────────────────────

@@ -13,6 +13,7 @@ const mockPrisma = {
     findMany: jest.fn(),
     create: jest.fn(),
     update: jest.fn(),
+    updateMany: jest.fn(),
     count: jest.fn(),
     groupBy: jest.fn(),
   },
@@ -395,6 +396,41 @@ describe('MarketService', () => {
     it('throws BadRequestException when market is not ACTIVE', async () => {
       mockPrisma.market.findUnique.mockResolvedValue(makeMarket({ status: 'DRAFT' }));
       await expect(service.closeMarket('market-1')).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  // ── autoCloseExpiredMarkets ─────────────────────────────────────────────────
+
+  describe('autoCloseExpiredMarkets', () => {
+    it('closes every ACTIVE market whose closeAt has passed — previously closesAt was purely informational and nothing enforced it', async () => {
+      mockPrisma.market.findMany.mockResolvedValue([{ id: 'market-1' }, { id: 'market-2' }]);
+      mockPrisma.market.updateMany.mockResolvedValue({ count: 2 });
+
+      await service.autoCloseExpiredMarkets();
+
+      expect(mockPrisma.market.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { status: 'ACTIVE', closeAt: { lte: expect.any(Date) } },
+        }),
+      );
+      expect(mockPrisma.market.updateMany).toHaveBeenCalledWith({
+        where: { id: { in: ['market-1', 'market-2'] } },
+        data: { status: 'CLOSED' },
+      });
+      expect(mockKafka.publish).toHaveBeenCalledTimes(2);
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('market.closed'),
+        expect.objectContaining({ marketId: 'market-1' }),
+      );
+    });
+
+    it('does nothing when no markets are past their deadline', async () => {
+      mockPrisma.market.findMany.mockResolvedValue([]);
+
+      await service.autoCloseExpiredMarkets();
+
+      expect(mockPrisma.market.updateMany).not.toHaveBeenCalled();
+      expect(mockKafka.publish).not.toHaveBeenCalled();
     });
   });
 

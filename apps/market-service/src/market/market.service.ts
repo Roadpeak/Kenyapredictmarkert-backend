@@ -1,4 +1,5 @@
 import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from './prisma.service';
 import { KafkaService, KAFKA_TOPICS } from '@org/kafka-client';
 import { calcYesPrice, calcNoPrice } from '@org/utils';
@@ -325,6 +326,32 @@ export class MarketService {
 
     await this.kafka.publish(KAFKA_TOPICS.MARKET_CLOSED, { marketId });
     return updated;
+  }
+
+  // ─── Auto-close markets past their closesAt deadline ──────────────────────────
+
+  // closesAt was purely informational — nothing ever enforced it, so an
+  // ACTIVE market kept accepting trades indefinitely past its own deadline
+  // until an admin remembered to close or resolve it by hand. Runs every
+  // minute so the window between deadline and enforcement stays small.
+  @Cron(CronExpression.EVERY_MINUTE)
+  async autoCloseExpiredMarkets() {
+    const expired = await this.prisma.market.findMany({
+      where: { status: 'ACTIVE', closeAt: { lte: new Date() } },
+      select: { id: true },
+    });
+    if (expired.length === 0) return;
+
+    await this.prisma.market.updateMany({
+      where: { id: { in: expired.map((m) => m.id) } },
+      data: { status: 'CLOSED' },
+    });
+
+    await Promise.all(
+      expired.map((m) => this.kafka.publish(KAFKA_TOPICS.MARKET_CLOSED, { marketId: m.id })),
+    );
+
+    this.logger.log(`Auto-closed ${expired.length} market(s) past their closesAt deadline`);
   }
 
   // ─── Admin: Update image ──────────────────────────────────────────────────────
