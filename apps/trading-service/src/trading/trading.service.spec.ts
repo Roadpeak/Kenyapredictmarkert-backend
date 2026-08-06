@@ -502,6 +502,21 @@ describe('TradingService', () => {
       });
     });
 
+    it('returns sharesHeld/costKes as real numbers, not the raw Decimal-as-string columns — previously the portfolio page rendered NaN for both', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ totalShares: 100, totalCostKes: 1000 }),
+      ]);
+      mockPrisma.marketPool.findMany.mockResolvedValue([makePool()]);
+      mockHttp.get.mockReturnValue(of(axiosResponse([])));
+
+      const result = await service.getMyPositions('user-1');
+
+      expect(result[0].sharesHeld).toBe(100);
+      expect(result[0].costKes).toBe(1000);
+      expect(typeof result[0].sharesHeld).toBe('number');
+      expect(typeof result[0].costKes).toBe('number');
+    });
+
     it('falls back to the raw marketId when market-service is unreachable — previously this field was missing entirely, showing blank in the UI', async () => {
       mockPrisma.position.findMany.mockResolvedValue([makePosition()]);
       mockPrisma.marketPool.findMany.mockResolvedValue([makePool()]);

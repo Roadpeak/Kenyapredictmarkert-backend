@@ -222,18 +222,23 @@ export class TradingService {
           : calcNoPrice(Number(pool.poolYesKes), Number(pool.poolNoKes))
         : Number(pos.avgPriceKes);
 
-      const currentValue = Number(pos.totalShares) * SHARE_PRICE_KES * currentPrice;
-      const costBasis = Number(pos.totalCostKes);
-      const unrealizedPnl = currentValue - costBasis;
+      const sharesHeld = Number(pos.totalShares);
+      const costKes = Number(pos.totalCostKes);
+      const currentValue = sharesHeld * SHARE_PRICE_KES * currentPrice;
+      const unrealizedPnl = currentValue - costKes;
 
+      // Field names follow api.html (sharesHeld/costKes), not the raw
+      // Decimal columns (totalShares/totalCostKes, serialized as strings) —
+      // the frontend renders these directly and previously got NaN for both.
       return {
         ...pos,
         marketTitle: titles.get(pos.marketId) ?? pos.marketId,
+        sharesHeld,
+        costKes,
         currentPrice,
         currentValue,
-        costBasis,
         unrealizedPnl,
-        unrealizedPnlPct: costBasis > 0 ? (unrealizedPnl / costBasis) * 100 : 0,
+        unrealizedPnlPct: costKes > 0 ? (unrealizedPnl / costKes) * 100 : 0,
       };
     });
   }
