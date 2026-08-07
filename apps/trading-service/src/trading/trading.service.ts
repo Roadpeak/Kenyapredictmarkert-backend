@@ -244,6 +244,90 @@ export class TradingService {
   }
 
   /**
+   * Every position on one market, with real user identity — the admin
+   * counterpart to the public, anonymized getMarketTrades. Works for a
+   * market in any status: called on an ACTIVE/CLOSED market this is "who
+   * has staked and what they chose right now"; called on a RESOLVED market
+   * the same isSettled/payoutKes fields show who won, who lost, and by how
+   * much. Binary and MULTI positions are merged into one roster since an
+   * admin looking at a market doesn't care which table backs it.
+   */
+  async getMarketRoster(marketId: string, page: number, limit: number) {
+    const [binary, options] = await Promise.all([
+      this.prisma.position.findMany({ where: { marketId } }),
+      this.prisma.optionPosition.findMany({ where: { marketId } }),
+    ]);
+
+    const userIds = [...new Set([...binary.map((p) => p.userId), ...options.map((p) => p.userId)])];
+    const displayNames = await this.resolveDisplayNames(userIds);
+
+    const roster = [
+      ...binary.map((p) => ({
+        userId: p.userId,
+        displayName: displayNames.get(p.userId) ?? 'Trader',
+        label: p.outcome,
+        sharesHeld: Number(p.totalShares),
+        costKes: Number(p.totalCostKes),
+        isSettled: p.isSettled,
+        payoutKes: p.payoutKes !== null ? Number(p.payoutKes) : null,
+        won: p.isSettled ? Number(p.payoutKes ?? 0) > 0 : null,
+        updatedAt: p.updatedAt.toISOString(),
+      })),
+      ...options.map((p) => ({
+        userId: p.userId,
+        displayName: displayNames.get(p.userId) ?? 'Trader',
+        label: p.label,
+        sharesHeld: Number(p.totalShares),
+        costKes: Number(p.totalCostKes),
+        isSettled: p.isSettled,
+        payoutKes: p.payoutKes !== null ? Number(p.payoutKes) : null,
+        won: p.isSettled ? Number(p.payoutKes ?? 0) > 0 : null,
+        updatedAt: p.updatedAt.toISOString(),
+      })),
+    ].sort((a, b) => b.costKes - a.costKes);
+
+    const total = roster.length;
+    const start = (page - 1) * limit;
+    const data = roster.slice(start, start + limit);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      winnerCount: roster.filter((r) => r.won === true).length,
+      loserCount: roster.filter((r) => r.won === false).length,
+      totalStakedKes: roster.reduce((sum, r) => sum + r.costKes, 0),
+      totalPaidOutKes: roster.reduce((sum, r) => sum + (r.payoutKes ?? 0), 0),
+    };
+  }
+
+  // Batch-resolves userId -> display name via user-service's internal
+  // endpoint — same pattern as resolveMarketTitles, mirrored from
+  // analytics-service's fetchDisplayNames since trading-service has no
+  // existing user-service client of its own.
+  private async resolveDisplayNames(userIds: string[]): Promise<Map<string, string>> {
+    const uniqueIds = [...new Set(userIds)];
+    if (uniqueIds.length === 0) return new Map();
+
+    const userServiceUrl = this.config.get('USER_SERVICE_URL', 'http://localhost:3002');
+    const internalKey = this.config.get('INTERNAL_API_KEY');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<Record<string, string>>(
+          `${userServiceUrl}/api/internal/users/display-names`,
+          { params: { ids: uniqueIds.join(',') }, headers: { 'x-internal-key': internalKey } },
+        ),
+      );
+      return new Map(Object.entries(response.data));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Failed to resolve display names: ${msg}`);
+      return new Map();
+    }
+  }
+
+  /**
    * Settled positions (won or lost) across both binary and MULTI markets —
    * the counterpart to getMyPositions/getMyOptionPositions, which both
    * explicitly filter isSettled: false. Without this there was nowhere a

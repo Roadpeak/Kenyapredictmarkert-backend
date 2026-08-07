@@ -604,6 +604,76 @@ describe('TradingService', () => {
     });
   });
 
+  // ── getMarketRoster ──────────────────────────────────────────────────────────
+
+  describe('getMarketRoster', () => {
+    it('lists every staker on a live market with real identity, largest stake first — the admin counterpart to the anonymized public trade list', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ userId: 'user-1', outcome: 'YES', totalCostKes: 100, totalShares: 10, isSettled: false, payoutKes: null }),
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        {
+          id: 'opos-1', userId: 'user-2', marketId: 'market-1', optionId: 'opt-a', label: 'Haaland',
+          totalShares: 30, totalCostKes: 300, isSettled: false, payoutKes: null, updatedAt: new Date(),
+        },
+      ]);
+      mockHttp.get.mockReturnValue(of(axiosResponse({ 'user-1': 'Alice', 'user-2': 'Bob' })));
+
+      const result = await service.getMarketRoster('market-1', 1, 20);
+
+      expect(result.total).toBe(2);
+      expect(result.data[0]).toMatchObject({ userId: 'user-2', displayName: 'Bob', costKes: 300, isSettled: false, won: null });
+      expect(result.data[1]).toMatchObject({ userId: 'user-1', displayName: 'Alice', costKes: 100, isSettled: false, won: null });
+    });
+
+    it('reports won/lost and payout for a resolved market, plus winner/loser counts and totals', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ userId: 'user-1', outcome: 'YES', totalCostKes: 100, isSettled: true, payoutKes: 240 }),
+        makePosition({ userId: 'user-2', outcome: 'NO', totalCostKes: 50, isSettled: true, payoutKes: 0 }),
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+      mockHttp.get.mockReturnValue(of(axiosResponse({ 'user-1': 'Alice', 'user-2': 'Bob' })));
+
+      const result = await service.getMarketRoster('market-1', 1, 20);
+
+      expect(result.winnerCount).toBe(1);
+      expect(result.loserCount).toBe(1);
+      expect(result.totalStakedKes).toBe(150);
+      expect(result.totalPaidOutKes).toBe(240);
+      const winner = result.data.find((r) => r.userId === 'user-1');
+      const loser = result.data.find((r) => r.userId === 'user-2');
+      expect(winner).toMatchObject({ won: true, payoutKes: 240 });
+      expect(loser).toMatchObject({ won: false, payoutKes: 0 });
+    });
+
+    it('paginates the roster', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ id: 'p1', userId: 'a', totalCostKes: 300 }),
+        makePosition({ id: 'p2', userId: 'b', totalCostKes: 200 }),
+        makePosition({ id: 'p3', userId: 'c', totalCostKes: 100 }),
+      ]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+      mockHttp.get.mockReturnValue(of(axiosResponse({})));
+
+      const result = await service.getMarketRoster('market-1', 2, 1);
+
+      expect(result.total).toBe(3);
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].userId).toBe('b');
+    });
+
+    it('returns an empty roster with zeroed totals when nobody has staked', async () => {
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.optionPosition.findMany.mockResolvedValue([]);
+
+      const result = await service.getMarketRoster('market-1', 1, 20);
+
+      expect(result).toMatchObject({
+        data: [], total: 0, winnerCount: 0, loserCount: 0, totalStakedKes: 0, totalPaidOutKes: 0,
+      });
+    });
+  });
+
   // ── getMarketOptionPositions ────────────────────────────────────────────────
 
   describe('getMarketOptionPositions', () => {

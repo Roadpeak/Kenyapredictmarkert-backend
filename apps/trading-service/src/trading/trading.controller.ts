@@ -4,7 +4,8 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { TradingService } from './trading.service';
 import { PlaceTradeDto, PlaceOptionTradeDto } from './trading.dto';
-import { CurrentUser, Public } from '@org/decorators';
+import { CurrentUser, Public, Roles } from '@org/decorators';
+import { Role } from '@org/types';
 import type { JwtPayload } from '@org/types';
 
 @ApiTags('trades')
@@ -51,6 +52,28 @@ export class TradingController {
     @Query('limit') limit = 20,
   ) {
     return this.tradingService.getMyResults(user.sub, +page, +limit);
+  }
+
+  @Get('trades/users/:userId/results')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] Settled positions (won or lost) for any user, for the Win/Loss drill-down' })
+  getUserResults(
+    @Param('userId') userId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.tradingService.getMyResults(userId, +page, +limit);
+  }
+
+  @Get('trades/admin/markets/:marketId/roster')
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiOperation({ summary: '[Admin] Every stake on one market with real identity — who staked what (live) or who won/lost (resolved)' })
+  getMarketRoster(
+    @Param('marketId') marketId: string,
+    @Query('page') page = 1,
+    @Query('limit') limit = 20,
+  ) {
+    return this.tradingService.getMarketRoster(marketId, +page, +limit);
   }
 
   @Get('trades/me/options')
