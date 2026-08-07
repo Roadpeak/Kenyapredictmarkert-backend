@@ -1,0 +1,37 @@
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../../../node_modules/.prisma/comments-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("COMMENTS_DATABASE_URL")
+}
+
+/// A comment (or one-level-deep reply) on a market. Soft-deleted/hidden via
+/// timestamps rather than a status enum — cheaper to query
+/// (WHERE hiddenAt IS NULL AND deletedAt IS NULL) and keeps admin moderation
+/// (hiddenAt/hiddenBy) distinct from the author's own delete (deletedAt) for
+/// audit purposes. Nesting depth beyond one level is rejected in the service
+/// layer, not enforced here — the schema allows arbitrary parentId chains,
+/// the service refuses to create a reply whose own parent already has a
+/// parent.
+model Comment {
+  id        String    @id @default(cuid())
+  marketId  String
+  userId    String
+  body      String
+  parentId  String?
+  parent    Comment?  @relation("Replies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("Replies")
+  hiddenAt  DateTime?
+  hiddenBy  String?
+  deletedAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([marketId, parentId, createdAt])
+  @@index([userId, createdAt])
+  @@map("comments")
+}

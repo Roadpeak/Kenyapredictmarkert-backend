@@ -86,6 +86,9 @@
     },
     {
       "path": "./libs/shared/utils"
+    },
+    {
+      "path": "./apps/comments-service"
     }
   ]
 }

@@ -674,6 +674,90 @@ describe('TradingService', () => {
     });
   });
 
+  // ── getMarketHolders ─────────────────────────────────────────────────────────
+
+  describe('getMarketHolders', () => {
+    it('ranks binary holders by CURRENT position value (not cost), split into yes/no — the public, identity-revealing counterpart to Top Holders', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(0); // binary market
+      mockPrisma.position.findMany.mockResolvedValue([
+        makePosition({ userId: 'user-1', outcome: 'YES', totalShares: 10, totalCostKes: 100 }),
+        makePosition({ userId: 'user-2', outcome: 'YES', totalShares: 50, totalCostKes: 400 }),
+        makePosition({ userId: 'user-3', outcome: 'NO', totalShares: 20, totalCostKes: 150 }),
+      ]);
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool({ poolYesKes: 1500, poolNoKes: 1000 }));
+      mockHttp.get.mockReturnValue(
+        of(axiosResponse({ 'user-1': 'Alice', 'user-2': 'Bob', 'user-3': 'Carol' })),
+      );
+
+      const result = await service.getMarketHolders('market-1');
+
+      expect(result.marketType).toBe('BINARY');
+      if (result.marketType !== 'BINARY') throw new Error('expected BINARY');
+
+      // yesPrice = 1500/2500 = 0.6 -> user-2: 50*10*0.6=300, user-1: 10*10*0.6=60
+      expect(result.yes).toHaveLength(2);
+      expect(result.yes[0]).toMatchObject({ userId: 'user-2', displayName: 'Bob', currentValue: 300 });
+      expect(result.yes[1]).toMatchObject({ userId: 'user-1', displayName: 'Alice', currentValue: 60 });
+
+      // noPrice = 1000/2500 = 0.4 -> user-3: 20*10*0.4=80
+      expect(result.no).toHaveLength(1);
+      expect(result.no[0]).toMatchObject({ userId: 'user-3', displayName: 'Carol', currentValue: 80 });
+    });
+
+    it('caps each side at the top 50 holders by current value', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(0);
+      const positions = Array.from({ length: 60 }, (_, i) =>
+        makePosition({ id: `pos-${i}`, userId: `user-${i}`, outcome: 'YES', totalShares: i + 1, totalCostKes: (i + 1) * 10 }),
+      );
+      mockPrisma.position.findMany.mockResolvedValue(positions);
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool({ poolYesKes: 1000, poolNoKes: 1000 }));
+      mockHttp.get.mockReturnValue(of(axiosResponse({})));
+
+      const result = await service.getMarketHolders('market-1');
+      if (result.marketType !== 'BINARY') throw new Error('expected BINARY');
+
+      expect(result.yes).toHaveLength(50);
+      // Highest shares (user-59, 60 shares) should rank first.
+      expect(result.yes[0].userId).toBe('user-59');
+    });
+
+    it('ranks MULTI holders per option, grouped by each runner\'s own pool share', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(2); // MULTI market
+      mockPrisma.optionPosition.findMany.mockResolvedValue([
+        { id: 'op-1', userId: 'user-1', marketId: 'market-1', optionId: 'opt-a', label: 'Haaland', totalShares: 10, totalCostKes: 100, avgPriceKes: 0.5, isSettled: false },
+        { id: 'op-2', userId: 'user-2', marketId: 'market-1', optionId: 'opt-b', label: 'Mbappe', totalShares: 20, totalCostKes: 150, avgPriceKes: 0.5, isSettled: false },
+      ]);
+      mockPrisma.optionPool.findMany.mockResolvedValue([
+        { optionId: 'opt-a', label: 'Haaland', poolKes: 700 },
+        { optionId: 'opt-b', label: 'Mbappe', poolKes: 300 },
+      ]);
+      mockHttp.get.mockReturnValue(of(axiosResponse({ 'user-1': 'Alice', 'user-2': 'Bob' })));
+
+      const result = await service.getMarketHolders('market-1');
+
+      expect(result.marketType).toBe('MULTI');
+      if (result.marketType !== 'MULTI') throw new Error('expected MULTI');
+
+      const haaland = result.options.find((o) => o.optionId === 'opt-a');
+      const mbappe = result.options.find((o) => o.optionId === 'opt-b');
+      // total pot = 1000, Haaland price = 700/1000 = 0.7 -> 10*10*0.7=70
+      expect(haaland?.holders[0]).toMatchObject({ userId: 'user-1', displayName: 'Alice', currentValue: 70 });
+      // Mbappe price = 300/1000 = 0.3 -> 20*10*0.3=60
+      expect(mbappe?.holders[0]).toMatchObject({ userId: 'user-2', displayName: 'Bob', currentValue: 60 });
+    });
+
+    it('returns empty yes/no arrays for a binary market with no open positions', async () => {
+      mockPrisma.optionPool.count.mockResolvedValue(0);
+      mockPrisma.position.findMany.mockResolvedValue([]);
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool());
+
+      const result = await service.getMarketHolders('market-1');
+      if (result.marketType !== 'BINARY') throw new Error('expected BINARY');
+      expect(result.yes).toEqual([]);
+      expect(result.no).toEqual([]);
+    });
+  });
+
   // ── getMarketOptionPositions ────────────────────────────────────────────────
 
   describe('getMarketOptionPositions', () => {

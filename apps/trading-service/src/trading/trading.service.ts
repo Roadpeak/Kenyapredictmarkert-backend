@@ -23,6 +23,15 @@ import { PlaceTradeDto } from './trading.dto';
 const SHARE_PRICE_KES = 10; // Fixed share price
 const MAX_OPTIMISTIC_LOCK_RETRIES = 3;
 
+interface HolderRow {
+  userId: string;
+  displayName: string;
+  sharesHeld: number;
+  costKes: number;
+  currentPrice: number;
+  currentValue: number;
+}
+
 @Injectable()
 export class TradingService {
   private readonly logger = new Logger(TradingService.name);
@@ -300,6 +309,97 @@ export class TradingService {
       totalStakedKes: roster.reduce((sum, r) => sum + r.costKes, 0),
       totalPaidOutKes: roster.reduce((sum, r) => sum + (r.payoutKes ?? 0), 0),
     };
+  }
+
+  /**
+   * Top holders for a market, ranked by CURRENT position value (not cost),
+   * split per outcome/option — like Polymarket's own Top Holders, this is
+   * deliberately identity-revealing (unlike the anonymized public
+   * getMarketTrades) since surfacing who's backing which side is the point
+   * of the feature. Unlike getMarketRoster (admin-only, sorted by cost,
+   * no live price), this is public and composes the same currentValue calc
+   * getMyPositions/getMyOptionPositions already do per-caller, but across
+   * every holder of the market at once.
+   */
+  async getMarketHolders(marketId: string): Promise<
+    | { marketType: 'BINARY'; yes: HolderRow[]; no: HolderRow[] }
+    | { marketType: 'MULTI'; options: { optionId: string; label: string; holders: HolderRow[] }[] }
+  > {
+    const hasOptions = (await this.prisma.optionPool.count({ where: { marketId } })) > 0;
+
+    if (hasOptions) {
+      const positions = await this.prisma.optionPosition.findMany({
+        where: { marketId, isSettled: false },
+      });
+      const pools = await this.prisma.optionPool.findMany({ where: { marketId } });
+      const total = pools.reduce((sum, p) => sum + Number(p.poolKes), 0);
+      const priceMap = new Map(
+        pools.map((p) => [p.optionId, total > 0 ? Number(p.poolKes) / total : 1 / (pools.length || 1)]),
+      );
+      const labelByOption = new Map(pools.map((p) => [p.optionId, p.label]));
+
+      const displayNames = await this.resolveDisplayNames(positions.map((p) => p.userId));
+
+      const holdersByOption = new Map<string, HolderRow[]>();
+      for (const pos of positions) {
+        const currentPrice = priceMap.get(pos.optionId) ?? Number(pos.avgPriceKes);
+        const sharesHeld = Number(pos.totalShares);
+        const costKes = Number(pos.totalCostKes);
+        const row: HolderRow = {
+          userId: pos.userId,
+          displayName: displayNames.get(pos.userId) ?? 'Trader',
+          sharesHeld,
+          costKes,
+          currentPrice,
+          currentValue: sharesHeld * SHARE_PRICE_KES * currentPrice,
+        };
+        const list = holdersByOption.get(pos.optionId) ?? [];
+        list.push(row);
+        holdersByOption.set(pos.optionId, list);
+      }
+
+      const options = pools.map((p) => ({
+        optionId: p.optionId,
+        label: labelByOption.get(p.optionId) ?? p.label,
+        holders: (holdersByOption.get(p.optionId) ?? [])
+          .sort((a, b) => b.currentValue - a.currentValue)
+          .slice(0, 50),
+      }));
+
+      return { marketType: 'MULTI', options };
+    }
+
+    const [positions, pool] = await Promise.all([
+      this.prisma.position.findMany({ where: { marketId, isSettled: false } }),
+      this.prisma.marketPool.findUnique({ where: { marketId } }),
+    ]);
+
+    const yesPrice = pool ? calcYesPrice(Number(pool.poolYesKes), Number(pool.poolNoKes)) : 0.5;
+    const noPrice = pool ? calcNoPrice(Number(pool.poolYesKes), Number(pool.poolNoKes)) : 0.5;
+
+    const displayNames = await this.resolveDisplayNames(positions.map((p) => p.userId));
+
+    const yes: HolderRow[] = [];
+    const no: HolderRow[] = [];
+    for (const pos of positions) {
+      const currentPrice = pos.outcome === 'YES' ? yesPrice : noPrice;
+      const sharesHeld = Number(pos.totalShares);
+      const costKes = Number(pos.totalCostKes);
+      const row: HolderRow = {
+        userId: pos.userId,
+        displayName: displayNames.get(pos.userId) ?? 'Trader',
+        sharesHeld,
+        costKes,
+        currentPrice,
+        currentValue: sharesHeld * SHARE_PRICE_KES * currentPrice,
+      };
+      (pos.outcome === 'YES' ? yes : no).push(row);
+    }
+
+    yes.sort((a, b) => b.currentValue - a.currentValue);
+    no.sort((a, b) => b.currentValue - a.currentValue);
+
+    return { marketType: 'BINARY', yes: yes.slice(0, 50), no: no.slice(0, 50) };
   }
 
   // Batch-resolves userId -> display name via user-service's internal

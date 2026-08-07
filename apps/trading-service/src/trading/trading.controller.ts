@@ -128,4 +128,11 @@ export class TradingController {
   ) {
     return this.tradingService.getMarketTrades(marketId, +page, +limit);
   }
+
+  @Public()
+  @Get('trades/markets/:marketId/holders')
+  @ApiOperation({ summary: 'Top holders for a market, ranked by current position value, split per outcome' })
+  getMarketHolders(@Param('marketId') marketId: string) {
+    return this.tradingService.getMarketHolders(marketId);
+  }
 }

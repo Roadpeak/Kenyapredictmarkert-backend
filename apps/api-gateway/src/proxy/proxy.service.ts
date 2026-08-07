@@ -39,6 +39,7 @@ export class ProxyService {
       { prefix: '/api/admin/payments', target: base('PAYMENT_SERVICE_URL', 3006) },
       { prefix: '/api/admin', target: base('ADMIN_SERVICE_URL', 3009) },
       { prefix: '/api/analytics', target: base('ANALYTICS_SERVICE_URL', 3010) },
+      { prefix: '/api/comments', target: base('COMMENTS_SERVICE_URL', 3011) },
     ];
 
     this.internalApiKey = config.get('INTERNAL_API_KEY', 'changeme');
