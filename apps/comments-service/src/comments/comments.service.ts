@@ -1,4 +1,11 @@
-import { Injectable, Logger, BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  InternalServerErrorException,
+} from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { ConfigService } from '@nestjs/config';
 import { firstValueFrom } from 'rxjs';
@@ -11,15 +18,45 @@ import { CreateCommentDto } from './comments.dto';
 // query, no new infrastructure.
 const COOLDOWN_MS = 15_000;
 
+// Kept in sync by hand with the frontend's src/lib/stickers.ts — the pack is
+// small and fixed, so a shared DB table or cross-service lookup would be
+// overkill for validating a posted stickerId.
+const VALID_STICKER_IDS = new Set([
+  'rocket',
+  'moon',
+  'bull',
+  'bear',
+  'chart-up',
+  'chart-down',
+  'fire',
+  'diamond-hands',
+  'trophy',
+  'skull',
+  'clown',
+  'brain',
+  'handshake',
+  'thinking',
+  'popcorn',
+  'hundred',
+]);
+
 interface CommentRow {
   id: string;
   marketId: string;
   userId: string;
   body: string | null;
+  gifUrl: string | null;
+  stickerId: string | null;
   parentId: string | null;
   createdAt: Date;
   displayName: string;
   replies?: CommentRow[];
+}
+
+export interface GifResult {
+  id: string;
+  url: string;
+  previewUrl: string;
 }
 
 @Injectable()
@@ -68,6 +105,8 @@ export class CommentsService {
         marketId: r.marketId,
         userId: r.userId,
         body: r.deletedAt ? null : r.body,
+        gifUrl: r.deletedAt ? null : r.gifUrl,
+        stickerId: r.deletedAt ? null : r.stickerId,
         parentId: r.parentId,
         createdAt: r.createdAt,
         displayName: displayNames.get(r.userId) ?? 'Trader',
@@ -80,6 +119,8 @@ export class CommentsService {
       marketId: c.marketId,
       userId: c.userId,
       body: c.deletedAt ? null : c.body,
+      gifUrl: c.deletedAt ? null : c.gifUrl,
+      stickerId: c.deletedAt ? null : c.stickerId,
       parentId: c.parentId,
       createdAt: c.createdAt,
       displayName: displayNames.get(c.userId) ?? 'Trader',
@@ -92,6 +133,20 @@ export class CommentsService {
   // ─── Write ──────────────────────────────────────────────────────────────────
 
   async create(userId: string, dto: CreateCommentDto) {
+    // A comment carries at most one attachment — a GIF and a sticker
+    // together would need the UI to render both, which no comment
+    // composer here supports, so it's rejected up front instead.
+    if (dto.gifUrl && dto.stickerId) {
+      throw new BadRequestException('A comment can include a GIF or a sticker, not both.');
+    }
+    if (dto.stickerId && !VALID_STICKER_IDS.has(dto.stickerId)) {
+      throw new BadRequestException('Unknown sticker.');
+    }
+    const body = dto.body?.trim() ?? '';
+    if (!body && !dto.gifUrl && !dto.stickerId) {
+      throw new BadRequestException('Comment cannot be empty.');
+    }
+
     const lastComment = await this.prisma.comment.findFirst({
       where: { userId },
       orderBy: { createdAt: 'desc' },
@@ -118,7 +173,10 @@ export class CommentsService {
       data: {
         marketId: dto.marketId,
         userId,
-        body: dto.body,
+        body,
+        gifUrl: dto.gifUrl ?? null,
+        gifId: dto.gifId ?? null,
+        stickerId: dto.stickerId ?? null,
         parentId: dto.parentId ?? null,
       },
     });
@@ -133,6 +191,33 @@ export class CommentsService {
       where: { id: commentId },
       data: { deletedAt: new Date() },
     });
+  }
+
+  // ─── GIF search (Giphy proxy) ──────────────────────────────────────────────
+
+  // Proxied server-side so GIPHY_API_KEY never reaches the browser bundle —
+  // same secret-handling convention as mpesa.service.ts. Unlike M-Pesa's
+  // OAuth dance, Giphy auth is a static api_key query param, so there's no
+  // token to fetch or cache here.
+  async searchGifs(query: string, offset = 0): Promise<GifResult[]> {
+    const apiKey = this.config.getOrThrow<string>('GIPHY_API_KEY');
+    try {
+      const response = await firstValueFrom(
+        this.http.get<{ data: Array<{ id: string; images: Record<string, { url: string }> }> }>(
+          'https://api.giphy.com/v1/gifs/search',
+          { params: { api_key: apiKey, q: query, limit: 20, offset, rating: 'pg-13' } },
+        ),
+      );
+      return response.data.data.map((g) => ({
+        id: g.id,
+        url: g.images.fixed_width?.url ?? g.images.original?.url,
+        previewUrl: g.images.fixed_width_small?.url ?? g.images.fixed_width?.url ?? g.images.original?.url,
+      }));
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.error(`Giphy search failed: ${msg}`);
+      throw new InternalServerErrorException('GIF search is temporarily unavailable');
+    }
   }
 
   // ─── Admin moderation ───────────────────────────────────────────────────────

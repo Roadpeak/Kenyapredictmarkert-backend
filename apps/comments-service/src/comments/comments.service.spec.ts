@@ -3,7 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { of } from 'rxjs';
 import { AxiosHeaders, AxiosResponse } from 'axios';
-import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { CommentsService } from './comments.service';
 import { PrismaService } from './prisma.service';
 
@@ -74,7 +79,15 @@ describe('CommentsService', () => {
       const result = await service.create('user-1', { marketId: 'market-1', body: 'Great market!' });
 
       expect(mockPrisma.comment.create).toHaveBeenCalledWith({
-        data: { marketId: 'market-1', userId: 'user-1', body: 'Great market!', parentId: null },
+        data: {
+          marketId: 'market-1',
+          userId: 'user-1',
+          body: 'Great market!',
+          gifUrl: null,
+          gifId: null,
+          stickerId: null,
+          parentId: null,
+        },
       });
       expect(result).toMatchObject({ body: 'Great market!' });
     });
@@ -109,7 +122,15 @@ describe('CommentsService', () => {
       await service.create('user-2', { marketId: 'market-1', body: 'I agree', parentId: 'parent-1' });
 
       expect(mockPrisma.comment.create).toHaveBeenCalledWith({
-        data: { marketId: 'market-1', userId: 'user-2', body: 'I agree', parentId: 'parent-1' },
+        data: {
+          marketId: 'market-1',
+          userId: 'user-2',
+          body: 'I agree',
+          gifUrl: null,
+          gifId: null,
+          stickerId: null,
+          parentId: 'parent-1',
+        },
       });
     });
 
@@ -144,6 +165,139 @@ describe('CommentsService', () => {
       await expect(
         service.create('user-1', { marketId: 'market-1', body: 'Reply', parentId: 'parent-1' }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rejects a comment with both a gifUrl and a stickerId set', async () => {
+      await expect(
+        service.create('user-1', {
+          marketId: 'market-1',
+          gifUrl: 'https://media.giphy.com/foo.gif',
+          stickerId: 'rocket',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.comment.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.comment.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects a comment with no body and no attachment', async () => {
+      await expect(
+        service.create('user-1', { marketId: 'market-1', body: '   ' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.comment.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown stickerId', async () => {
+      await expect(
+        service.create('user-1', { marketId: 'market-1', stickerId: 'not-a-real-sticker' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.comment.create).not.toHaveBeenCalled();
+    });
+
+    it('accepts a sticker-only comment with an empty body', async () => {
+      mockPrisma.comment.findFirst.mockResolvedValue(null);
+      mockPrisma.comment.create.mockResolvedValue(makeComment({ stickerId: 'rocket', body: '' }));
+
+      await service.create('user-1', { marketId: 'market-1', stickerId: 'rocket' });
+
+      expect(mockPrisma.comment.create).toHaveBeenCalledWith({
+        data: {
+          marketId: 'market-1',
+          userId: 'user-1',
+          body: '',
+          gifUrl: null,
+          gifId: null,
+          stickerId: 'rocket',
+          parentId: null,
+        },
+      });
+    });
+
+    it('accepts a gif-only comment and stores gifUrl/gifId', async () => {
+      mockPrisma.comment.findFirst.mockResolvedValue(null);
+      mockPrisma.comment.create.mockResolvedValue(
+        makeComment({ gifUrl: 'https://media.giphy.com/foo.gif', body: '' }),
+      );
+
+      await service.create('user-1', {
+        marketId: 'market-1',
+        gifUrl: 'https://media.giphy.com/foo.gif',
+        gifId: 'abc123',
+      });
+
+      expect(mockPrisma.comment.create).toHaveBeenCalledWith({
+        data: {
+          marketId: 'market-1',
+          userId: 'user-1',
+          body: '',
+          gifUrl: 'https://media.giphy.com/foo.gif',
+          gifId: 'abc123',
+          stickerId: null,
+          parentId: null,
+        },
+      });
+    });
+
+    it('accepts a captioned attachment (body + sticker together)', async () => {
+      mockPrisma.comment.findFirst.mockResolvedValue(null);
+      mockPrisma.comment.create.mockResolvedValue(makeComment({ stickerId: 'fire', body: 'lol' }));
+
+      await service.create('user-1', { marketId: 'market-1', body: 'lol', stickerId: 'fire' });
+
+      expect(mockPrisma.comment.create).toHaveBeenCalledWith({
+        data: {
+          marketId: 'market-1',
+          userId: 'user-1',
+          body: 'lol',
+          gifUrl: null,
+          gifId: null,
+          stickerId: 'fire',
+          parentId: null,
+        },
+      });
+    });
+  });
+
+  // ── searchGifs ──────────────────────────────────────────────────────────────
+
+  describe('searchGifs', () => {
+    it('maps a Giphy response down to {id, url, previewUrl}', async () => {
+      mockConfig.get.mockReturnValueOnce('test-giphy-key');
+      (mockConfig as unknown as { getOrThrow: jest.Mock }).getOrThrow = jest.fn(() => 'test-giphy-key');
+      mockHttp.get.mockReturnValue(
+        of(
+          axiosOk({
+            data: [
+              {
+                id: 'gif-1',
+                images: {
+                  fixed_width: { url: 'https://media.giphy.com/gif-1/fixed_width.gif' },
+                  fixed_width_small: { url: 'https://media.giphy.com/gif-1/fixed_width_small.gif' },
+                  original: { url: 'https://media.giphy.com/gif-1/original.gif' },
+                },
+              },
+            ],
+          }),
+        ),
+      );
+
+      const result = await service.searchGifs('celebration', 0);
+
+      expect(result).toEqual([
+        {
+          id: 'gif-1',
+          url: 'https://media.giphy.com/gif-1/fixed_width.gif',
+          previewUrl: 'https://media.giphy.com/gif-1/fixed_width_small.gif',
+        },
+      ]);
+    });
+
+    it('throws InternalServerErrorException when the Giphy request fails', async () => {
+      (mockConfig as unknown as { getOrThrow: jest.Mock }).getOrThrow = jest.fn(() => 'test-giphy-key');
+      mockHttp.get.mockImplementation(() => {
+        throw new Error('network error');
+      });
+
+      await expect(service.searchGifs('celebration')).rejects.toThrow(InternalServerErrorException);
     });
   });
 

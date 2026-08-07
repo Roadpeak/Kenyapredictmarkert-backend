@@ -36,6 +36,12 @@ export class CommentsController {
     return this.commentsService.deleteOwn(user.sub, id);
   }
 
+  @Get('comments/gifs/search')
+  @ApiOperation({ summary: 'Search GIFs via Giphy (proxied so the API key stays server-side)' })
+  searchGifs(@Query('q') q: string, @Query('offset') offset = 0) {
+    return this.commentsService.searchGifs(q, +offset);
+  }
+
   // ─── Admin moderation ───────────────────────────────────────────────────────
 
   @Get('comments/admin/queue')

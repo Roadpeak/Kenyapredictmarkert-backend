@@ -21,7 +21,10 @@ model Comment {
   id        String    @id @default(cuid())
   marketId  String
   userId    String
-  body      String
+  body      String    @default("")
+  gifUrl    String?
+  gifId     String?
+  stickerId String?
   parentId  String?
   parent    Comment?  @relation("Replies", fields: [parentId], references: [id])
   replies   Comment[] @relation("Replies")

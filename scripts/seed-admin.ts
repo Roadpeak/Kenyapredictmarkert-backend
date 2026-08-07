@@ -20,12 +20,12 @@ async function main() {
 
   const user = await prisma.user.upsert({
     where: { phone: ADMIN_PHONE },
-    update: { role: 'ADMIN', isPhoneVerified: true, passwordHash: hash },
+    update: { role: 'ADMIN', isVerified: true, passwordHash: hash },
     create: {
       phone: ADMIN_PHONE,
       passwordHash: hash,
       role: 'ADMIN',
-      isPhoneVerified: true,
+      isVerified: true,
     },
   });
 
