@@ -260,6 +260,85 @@ describe('TradingService', () => {
     });
   });
 
+  // ── placeTrade — wallet reserve release resilience ─────────────────────────
+  // Reproduces a real incident: under concurrent load, wallet-service's own
+  // debit call can fail after the pool/trade transaction already committed.
+  // The reserved funds MUST be released back to the user rather than staying
+  // stuck in reservedBalance forever — releaseWalletReserve needs to survive
+  // a transient failure on the release call itself, not just attempt once.
+
+  describe('placeTrade — wallet reserve release resilience', () => {
+    const dto = { marketId: 'market-1', outcome: 'YES', amountKes: 100, idempotencyKey: 'idem-release-1' };
+
+    beforeEach(() => {
+      mockPrisma.trade.findUnique.mockResolvedValue(null);
+      mockHttp.get.mockReturnValue(of(axiosResponse({ status: 'ACTIVE', id: 'market-1' })));
+      mockPrisma.$transaction.mockImplementation(async () => [{ ...makePool(), version: 1 }, makeTrade()]);
+      mockPrisma.position.findUnique.mockResolvedValue(null);
+      mockPrisma.position.upsert.mockResolvedValue(makePosition());
+      mockPrisma.marketPool.findUnique.mockResolvedValue(makePool({ version: 1 }));
+    });
+
+    it('still releases the reserve when confirmWalletDebit fails after the trade already committed', async () => {
+      let call = 0;
+      mockHttp.post.mockImplementation((url: string) => {
+        call++;
+        if (url.includes('/internal/wallet/reserve')) return of(axiosResponse({ success: true }));
+        if (url.includes('/internal/wallet/debit')) return throwError(() => new Error('debit failed'));
+        if (url.includes('/internal/wallet/release')) return of(axiosResponse({ success: true }));
+        throw new Error(`unexpected call #${call} to ${url}`);
+      });
+
+      await expect(service.placeTrade('user-1', dto as any)).rejects.toThrow(ConflictException);
+
+      const releaseCalls = mockHttp.post.mock.calls.filter((c: unknown[]) =>
+        String(c[0]).includes('/internal/wallet/release'),
+      );
+      expect(releaseCalls.length).toBeGreaterThan(0);
+      expect(releaseCalls[0][1]).toMatchObject({ userId: 'user-1', amount: 100 });
+    });
+
+    it('retries the release call on a transient failure instead of leaving funds stuck after one failed attempt', async () => {
+      jest.useFakeTimers();
+      let releaseAttempts = 0;
+      mockHttp.post.mockImplementation((url: string) => {
+        if (url.includes('/internal/wallet/reserve')) return of(axiosResponse({ success: true }));
+        if (url.includes('/internal/wallet/debit')) return throwError(() => new Error('debit failed'));
+        if (url.includes('/internal/wallet/release')) {
+          releaseAttempts++;
+          if (releaseAttempts < 2) return throwError(() => new Error('transient 500'));
+          return of(axiosResponse({ success: true }));
+        }
+        throw new Error(`unexpected call to ${url}`);
+      });
+
+      const assertion = expect(service.placeTrade('user-1', dto as any)).rejects.toThrow(ConflictException);
+      await jest.runAllTimersAsync();
+      await assertion;
+
+      expect(releaseAttempts).toBe(2);
+      jest.useRealTimers();
+    });
+
+    it('logs and gives up after exhausting release retries rather than throwing out of placeTrade a second time', async () => {
+      jest.useFakeTimers();
+      mockHttp.post.mockImplementation((url: string) => {
+        if (url.includes('/internal/wallet/reserve')) return of(axiosResponse({ success: true }));
+        if (url.includes('/internal/wallet/debit')) return throwError(() => new Error('debit failed'));
+        if (url.includes('/internal/wallet/release')) return throwError(() => new Error('wallet-service down'));
+        throw new Error(`unexpected call to ${url}`);
+      });
+
+      // Still surfaces the original "Market is busy" to the caller — release
+      // failure is logged, not re-thrown, since throwing here would mask the
+      // real error with a release-plumbing one.
+      const assertion = expect(service.placeTrade('user-1', dto as any)).rejects.toThrow(ConflictException);
+      await jest.runAllTimersAsync();
+      await assertion;
+      jest.useRealTimers();
+    });
+  });
+
   // ── placeTrade — market not active ─────────────────────────────────────────
 
   describe('placeTrade — market not active', () => {

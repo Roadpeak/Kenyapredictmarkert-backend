@@ -14,6 +14,36 @@ import {
 } from '@org/types';
 import { generateSettlementId } from '@org/utils';
 
+// Concurrent requests against the same wallet (e.g. a user double-clicking
+// "Buy" after a slow response, or several of their own trades landing at
+// once) race on the optimistic-lock `version` column. The loser's
+// tx.wallet.update() throws P2025 ("record not found" — its where clause's
+// version no longer matches) instead of silently corrupting data, which is
+// correct, but previously nothing caught it: it surfaced as an unhandled
+// 500 with no compensating retry, even though the balance itself was never
+// at risk (the failed attempt's transaction rolled back with nothing
+// committed). Retrying re-reads the wallet with its current version and
+// tries again, the same pattern trading-service already uses for
+// MarketPool version conflicts. A wallet row (unlike a MarketPool row,
+// scoped to one market) can be contended by trades across every market a
+// user is active in at once, so it gets a higher ceiling and a short
+// backoff between attempts rather than retrying in a tight loop.
+const MAX_OPTIMISTIC_LOCK_RETRIES = 6;
+
+async function withOptimisticLockRetry<T>(fn: () => Promise<T>): Promise<T> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const isVersionConflict = (err as { code?: string })?.code === 'P2025';
+      if (!isVersionConflict || attempt >= MAX_OPTIMISTIC_LOCK_RETRIES - 1) throw err;
+      attempt++;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
+  }
+}
+
 @Injectable()
 export class WalletService {
   private readonly logger = new Logger(WalletService.name);
@@ -77,44 +107,46 @@ export class WalletService {
     referenceType: string,
     description?: string,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findUnique({ where: { userId } });
-      if (!wallet) throw new NotFoundException('Wallet not found');
+    return withOptimisticLockRetry(() =>
+      this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        if (!wallet) throw new NotFoundException('Wallet not found');
 
-      const balanceBefore = Number(wallet.balance);
-      const balanceAfter = balanceBefore + amount;
+        const balanceBefore = Number(wallet.balance);
+        const balanceAfter = balanceBefore + amount;
 
-      await tx.wallet.update({
-        where: { userId, version: wallet.version },
-        data: {
-          balance: balanceAfter,
-          version: { increment: 1 },
-          lifetimeDeposit: type === LedgerType.DEPOSIT
-            ? { increment: amount }
-            : undefined,
-          lifetimePayout: type === LedgerType.PAYOUT
-            ? { increment: amount }
-            : undefined,
-        },
-      });
+        await tx.wallet.update({
+          where: { userId, version: wallet.version },
+          data: {
+            balance: balanceAfter,
+            version: { increment: 1 },
+            lifetimeDeposit: type === LedgerType.DEPOSIT
+              ? { increment: amount }
+              : undefined,
+            lifetimePayout: type === LedgerType.PAYOUT
+              ? { increment: amount }
+              : undefined,
+          },
+        });
 
-      await tx.ledgerEntry.create({
-        data: {
-          walletId: wallet.id,
-          userId,
-          type,
-          direction: Direction.CREDIT,
-          amount,
-          balanceBefore,
-          balanceAfter,
-          referenceId,
-          referenceType,
-          description,
-        },
-      });
+        await tx.ledgerEntry.create({
+          data: {
+            walletId: wallet.id,
+            userId,
+            type,
+            direction: Direction.CREDIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            referenceId,
+            referenceType,
+            description,
+          },
+        });
 
-      return { balanceBefore, balanceAfter, amount };
-    });
+        return { balanceBefore, balanceAfter, amount };
+      }),
+    );
   }
 
   // ─── Internal: Debit ──────────────────────────────────────────────────────────
@@ -127,116 +159,128 @@ export class WalletService {
     referenceType: string,
     description?: string,
   ) {
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findUnique({ where: { userId } });
-      if (!wallet) throw new NotFoundException('Wallet not found');
+    return withOptimisticLockRetry(() =>
+      this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        if (!wallet) throw new NotFoundException('Wallet not found');
 
-      const available = Number(wallet.balance) - Number(wallet.reservedBalance);
-      if (available < amount) {
-        throw new BadRequestException(
-          `Insufficient balance. Available: KES ${available.toFixed(2)}, Required: KES ${amount.toFixed(2)}`,
-        );
-      }
+        const available = Number(wallet.balance) - Number(wallet.reservedBalance);
+        if (available < amount) {
+          throw new BadRequestException(
+            `Insufficient balance. Available: KES ${available.toFixed(2)}, Required: KES ${amount.toFixed(2)}`,
+          );
+        }
 
-      const balanceBefore = Number(wallet.balance);
-      const balanceAfter = balanceBefore - amount;
+        const balanceBefore = Number(wallet.balance);
+        const balanceAfter = balanceBefore - amount;
 
-      await tx.wallet.update({
-        where: { userId, version: wallet.version },
-        data: {
-          balance: balanceAfter,
-          version: { increment: 1 },
-          lifetimeWithdraw: type === LedgerType.WITHDRAWAL
-            ? { increment: amount }
-            : undefined,
-        },
-      });
+        await tx.wallet.update({
+          where: { userId, version: wallet.version },
+          data: {
+            balance: balanceAfter,
+            version: { increment: 1 },
+            lifetimeWithdraw: type === LedgerType.WITHDRAWAL
+              ? { increment: amount }
+              : undefined,
+          },
+        });
 
-      await tx.ledgerEntry.create({
-        data: {
-          walletId: wallet.id,
-          userId,
-          type,
-          direction: Direction.DEBIT,
-          amount,
-          balanceBefore,
-          balanceAfter,
-          referenceId,
-          referenceType,
-          description,
-        },
-      });
+        await tx.ledgerEntry.create({
+          data: {
+            walletId: wallet.id,
+            userId,
+            type,
+            direction: Direction.DEBIT,
+            amount,
+            balanceBefore,
+            balanceAfter,
+            referenceId,
+            referenceType,
+            description,
+          },
+        });
 
-      return { balanceBefore, balanceAfter, amount };
-    });
+        return { balanceBefore, balanceAfter, amount };
+      }),
+    );
   }
 
   // ─── Internal: Reserve (before trade) ────────────────────────────────────────
 
   async reserve(userId: string, amount: number, referenceId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findUnique({ where: { userId } });
-      if (!wallet) throw new NotFoundException('Wallet not found');
+    return withOptimisticLockRetry(() =>
+      this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        if (!wallet) throw new NotFoundException('Wallet not found');
 
-      const available = Number(wallet.balance) - Number(wallet.reservedBalance);
-      if (available < amount) {
-        throw new BadRequestException(
-          `Insufficient balance. Available: KES ${available.toFixed(2)}, Required: KES ${amount.toFixed(2)}`,
-        );
-      }
+        const available = Number(wallet.balance) - Number(wallet.reservedBalance);
+        if (available < amount) {
+          throw new BadRequestException(
+            `Insufficient balance. Available: KES ${available.toFixed(2)}, Required: KES ${amount.toFixed(2)}`,
+          );
+        }
 
-      await tx.wallet.update({
-        where: { userId, version: wallet.version },
-        data: {
-          reservedBalance: { increment: amount },
-          version: { increment: 1 },
-        },
-      });
+        await tx.wallet.update({
+          where: { userId, version: wallet.version },
+          data: {
+            reservedBalance: { increment: amount },
+            version: { increment: 1 },
+          },
+        });
 
-      await tx.ledgerEntry.create({
-        data: {
-          walletId: wallet.id,
-          userId,
-          type: LedgerType.TRADE_RESERVE,
-          direction: Direction.DEBIT,
-          amount,
-          balanceBefore: Number(wallet.balance),
-          balanceAfter: Number(wallet.balance),
-          referenceId,
-          referenceType: 'TRADE',
-          description: 'Funds reserved for trade',
-        },
-      });
-    });
+        await tx.ledgerEntry.create({
+          data: {
+            walletId: wallet.id,
+            userId,
+            type: LedgerType.TRADE_RESERVE,
+            direction: Direction.DEBIT,
+            amount,
+            balanceBefore: Number(wallet.balance),
+            balanceAfter: Number(wallet.balance),
+            referenceId,
+            referenceType: 'TRADE',
+            description: 'Funds reserved for trade',
+          },
+        });
+      }),
+    );
   }
 
   // ─── Internal: Release reserve ────────────────────────────────────────────────
 
   async releaseReserve(userId: string, amount: number, referenceId: string) {
-    return this.prisma.$transaction(async (tx) => {
-      const wallet = await tx.wallet.findUnique({ where: { userId } });
-      if (!wallet) return;
+    return withOptimisticLockRetry(() =>
+      this.prisma.$transaction(async (tx) => {
+        const wallet = await tx.wallet.findUnique({ where: { userId } });
+        if (!wallet) return;
 
-      await tx.wallet.update({
-        where: { userId },
-        data: { reservedBalance: { decrement: amount } },
-      });
+        // Unlike the other mutators, this one previously had no version
+        // check on the update — two concurrent releases could both read
+        // the same reservedBalance and each write their own decrement,
+        // losing one of the two decrements (last-write-wins) instead of
+        // failing loudly. Locking on version turns that silent data loss
+        // into a retried, correctly-applied second decrement.
+        await tx.wallet.update({
+          where: { userId, version: wallet.version },
+          data: { reservedBalance: { decrement: amount }, version: { increment: 1 } },
+        });
 
-      await tx.ledgerEntry.create({
-        data: {
-          walletId: wallet.id,
-          userId,
-          type: LedgerType.TRADE_RELEASE,
-          direction: Direction.CREDIT,
-          amount,
-          balanceBefore: Number(wallet.balance),
-          balanceAfter: Number(wallet.balance),
-          referenceId,
-          referenceType: 'TRADE',
-          description: 'Reserved funds released',
-        },
-      });
-    });
+        await tx.ledgerEntry.create({
+          data: {
+            walletId: wallet.id,
+            userId,
+            type: LedgerType.TRADE_RELEASE,
+            direction: Direction.CREDIT,
+            amount,
+            balanceBefore: Number(wallet.balance),
+            balanceAfter: Number(wallet.balance),
+            referenceId,
+            referenceType: 'TRADE',
+            description: 'Reserved funds released',
+          },
+        });
+      }),
+    );
   }
 
   // ─── Kafka: settle market (batch payouts) ─────────────────────────────────────

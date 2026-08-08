@@ -192,6 +192,38 @@ describe('WalletService', () => {
       tx.wallet.findUnique.mockResolvedValue(makeWallet({ balance: 100, reservedBalance: 0 }));
       await expect(service.reserve('user-1', 500, 'ref')).rejects.toThrow(BadRequestException);
     });
+
+    it('retries on a P2025 optimistic-lock version conflict and succeeds on the next attempt', async () => {
+      const p2025 = Object.assign(new Error('No record was found for an update.'), { code: 'P2025' });
+      tx.wallet.findUnique.mockResolvedValue(makeWallet({ balance: 5000, reservedBalance: 0 }));
+      tx.wallet.update.mockRejectedValueOnce(p2025).mockResolvedValueOnce({});
+      tx.ledgerEntry.create.mockResolvedValue({});
+
+      await expect(service.reserve('user-1', 200, 'trade-idem-key')).resolves.toBeUndefined();
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up and rethrows after exhausting all retries on repeated P2025 conflicts', async () => {
+      jest.useFakeTimers();
+      const p2025 = Object.assign(new Error('No record was found for an update.'), { code: 'P2025' });
+      tx.wallet.findUnique.mockResolvedValue(makeWallet({ balance: 5000, reservedBalance: 0 }));
+      tx.wallet.update.mockRejectedValue(p2025);
+
+      const assertion = expect(service.reserve('user-1', 200, 'trade-idem-key')).rejects.toMatchObject({
+        code: 'P2025',
+      });
+      await jest.runAllTimersAsync();
+      await assertion;
+
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(6);
+      jest.useRealTimers();
+    });
+
+    it('does not retry on a non-version-conflict error (e.g. insufficient balance)', async () => {
+      tx.wallet.findUnique.mockResolvedValue(makeWallet({ balance: 100, reservedBalance: 0 }));
+      await expect(service.reserve('user-1', 500, 'ref')).rejects.toThrow(BadRequestException);
+      expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
+    });
   });
 
   // ── releaseReserve ──────────────────────────────────────────────────────────

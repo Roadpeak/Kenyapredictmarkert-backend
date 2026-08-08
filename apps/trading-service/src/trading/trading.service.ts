@@ -1249,24 +1249,43 @@ export class TradingService {
     await this.releaseWalletReserve(userId, amount, referenceId);
   }
 
+  // This is the only thing standing between a failed trade and a user's
+  // money being stuck in `reservedBalance` forever — wallet-service's own
+  // optimistic-lock retries can still be exhausted under heavy concurrent
+  // contention on one wallet row, so a single un-retried attempt here isn't
+  // enough. Three attempts with a short backoff so a second wave of
+  // contention on the wallet row has time to clear before giving up.
   private async releaseWalletReserve(userId: string, amount: number, referenceId: string) {
     const walletUrl = this.config.get('WALLET_SERVICE_URL', 'http://localhost:3005');
     const internalKey = this.config.getOrThrow('INTERNAL_API_KEY');
-    try {
-      await firstValueFrom(
-        this.http.post(
-          `${walletUrl}/api/internal/wallet/release`,
-          {
-            userId,
-            amount,
-            referenceId,
-          },
-          { headers: { 'x-internal-key': internalKey } },
-        ),
-      );
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`Failed to release reserve for user ${userId}: ${msg}`);
+    const MAX_RELEASE_ATTEMPTS = 3;
+
+    for (let attempt = 1; attempt <= MAX_RELEASE_ATTEMPTS; attempt++) {
+      try {
+        await firstValueFrom(
+          this.http.post(
+            `${walletUrl}/api/internal/wallet/release`,
+            {
+              userId,
+              amount,
+              referenceId,
+            },
+            { headers: { 'x-internal-key': internalKey } },
+          ),
+        );
+        return;
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (attempt === MAX_RELEASE_ATTEMPTS) {
+          this.logger.error(
+            `Failed to release reserve for user ${userId} after ${MAX_RELEASE_ATTEMPTS} attempts — ` +
+              `KES ${amount} remains stuck in reservedBalance until manually reconciled: ${msg}`,
+          );
+          return;
+        }
+        this.logger.warn(`Release reserve attempt ${attempt} failed for user ${userId}, retrying: ${msg}`);
+        await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+      }
     }
   }
 
