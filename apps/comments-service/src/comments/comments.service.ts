@@ -38,6 +38,14 @@ const VALID_STICKER_IDS = new Set([
   'thinking',
   'popcorn',
   'hundred',
+  'thumbs-up',
+  'thumbs-down',
+  'laughing',
+  'crying',
+  'heart',
+  'clap',
+  'shocked',
+  'eyes',
 ]);
 
 interface CommentRow {
