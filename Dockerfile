@@ -44,9 +44,14 @@ RUN pnpm exec nx run-many --target=build \
     --parallel=4 \
     --skip-nx-cache
 
-# Now build all 11 microservices.
-RUN pnpm exec nx run-many --target=build \
-    --projects=api-gateway,auth-service,user-service,market-service,trading-service,wallet-service,payment-service,notification-service,feed-service,admin-service,analytics-service,comments-service \
+# Now build every microservice under apps/. Discovered from the filesystem
+# so a new app just needs `apps/<name>/project.json` — no Dockerfile edit.
+# Same rationale drives the SERVICES loop in scripts/prisma-all.sh.
+# `-e2e` sibling projects are Nx e2e test suites, not runtime apps — skip them.
+RUN PROJECTS=$(ls -1d apps/*/ | xargs -n1 basename | grep -vE -- '-e2e$' | paste -sd, -) \
+ && echo "→ building projects: $PROJECTS" \
+ && pnpm exec nx run-many --target=build \
+    --projects="$PROJECTS" \
     --parallel=4 \
     --skip-nx-cache
 
