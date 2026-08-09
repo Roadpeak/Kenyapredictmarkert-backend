@@ -46,7 +46,7 @@ RUN pnpm exec nx run-many --target=build \
 
 # Now build all 11 microservices.
 RUN pnpm exec nx run-many --target=build \
-    --projects=api-gateway,auth-service,user-service,market-service,trading-service,wallet-service,payment-service,notification-service,feed-service,admin-service,analytics-service \
+    --projects=api-gateway,auth-service,user-service,market-service,trading-service,wallet-service,payment-service,notification-service,feed-service,admin-service,analytics-service,comments-service \
     --parallel=4 \
     --skip-nx-cache
 

@@ -8,3 +8,4 @@ CREATE DATABASE payment_db;
 CREATE DATABASE notification_db;
 CREATE DATABASE analytics_db;
 CREATE DATABASE feed_db;
+CREATE DATABASE comments_db;
