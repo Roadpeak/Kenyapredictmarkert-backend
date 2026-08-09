@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 CMD="${1:-generate}"
-SERVICES=(auth-service user-service market-service trading-service wallet-service payment-service notification-service analytics-service feed-service)
+SERVICES=(auth-service user-service market-service trading-service wallet-service payment-service notification-service analytics-service feed-service comments-service)
 
 for svc in "${SERVICES[@]}"; do
   echo "→ prisma $CMD: $svc"
