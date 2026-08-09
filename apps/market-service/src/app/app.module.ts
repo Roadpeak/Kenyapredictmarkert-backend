@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { MarketController } from '../market/market.controller';
 import { MarketService } from '../market/market.service';
+import { UploadService } from '../market/upload.service';
 import { PrismaService } from '../market/prisma.service';
 import { KafkaService } from '@org/kafka-client';
 import { JwtAuthGuard } from '@org/decorators';
@@ -14,6 +15,7 @@ import { JwtAuthGuard } from '@org/decorators';
   providers: [
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     MarketService,
+    UploadService,
     PrismaService,
     {
       provide: KafkaService,

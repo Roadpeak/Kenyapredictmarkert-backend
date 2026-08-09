@@ -1,8 +1,12 @@
 import {
   Controller, Get, Post, Put, Param, Query, Body, HttpCode, HttpStatus,
+  UseInterceptors, UploadedFile,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import { MarketService } from './market.service';
+import { UploadService } from './upload.service';
 import { CreateMarketDto, ResolveMarketDto, MarketQueryDto } from './market.dto';
 import { CurrentUser, Roles, Public } from '@org/decorators';
 import type { JwtPayload } from '@org/types';
@@ -11,7 +15,10 @@ import { Role } from '@org/types';
 @ApiTags('markets')
 @Controller()
 export class MarketController {
-  constructor(private readonly marketService: MarketService) {}
+  constructor(
+    private readonly marketService: MarketService,
+    private readonly uploadService: UploadService,
+  ) {}
 
   @Public()
   @Get('markets')
@@ -64,6 +71,20 @@ export class MarketController {
   @ApiOperation({ summary: '[Admin] Create market' })
   createMarket(@Body() dto: CreateMarketDto, @CurrentUser() admin: JwtPayload) {
     return this.marketService.createMarket(dto, admin.sub);
+  }
+
+  @Post('admin/markets/images')
+  @ApiBearerAuth()
+  @Roles(Role.ADMIN, Role.SUPER_ADMIN)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  @ApiOperation({
+    summary: '[Admin] Upload a market or option image to Cloudinary, returns { url }. ' +
+      'Not tied to a specific market — used during creation before the market exists, ' +
+      'for both the main market image and per-option images.',
+  })
+  uploadMarketImage(@UploadedFile() file: Express.Multer.File) {
+    return this.uploadService.uploadMarketImage(file);
   }
 
   @Put('admin/markets/:id/activate')

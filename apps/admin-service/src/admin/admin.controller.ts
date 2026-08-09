@@ -1,7 +1,10 @@
 import {
-  Controller, Get, Post, Param, Body, Query, UseGuards, HttpCode, HttpStatus, Req,
+  Controller, Get, Post, Param, Body, Query, UseGuards, UseInterceptors, UploadedFile,
+  HttpCode, HttpStatus, Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { memoryStorage } from 'multer';
 import type { Request } from 'express';
 import { AdminService, CreateMarketDto, ResolveMarketDto } from './admin.service';
 import { AdminGuard } from '../common/guards/admin.guard';
@@ -70,6 +73,18 @@ export class AdminController {
   @ApiOperation({ summary: 'Update market image URL' })
   updateMarketImage(@Param('id') id: string, @Body('imageUrl') imageUrl: string, @Req() req: Request) {
     return this.adminService.updateMarketImage(id, imageUrl, extractToken(req));
+  }
+
+  @Post('markets/images')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiConsumes('multipart/form-data')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  @ApiOperation({
+    summary: 'Upload a market or option image to Cloudinary, returns { url }. ' +
+      'Not tied to a specific market — used during creation before the market exists.',
+  })
+  uploadMarketImage(@UploadedFile() file: Express.Multer.File, @Req() req: Request) {
+    return this.adminService.uploadMarketImage(file, extractToken(req));
   }
 
   // ─── KYC ────────────────────────────────────────────────────────────────────

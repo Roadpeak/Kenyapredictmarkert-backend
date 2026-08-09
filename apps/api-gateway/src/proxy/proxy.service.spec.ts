@@ -124,6 +124,38 @@ describe('ProxyService', () => {
       const callConfig = mockHttp.request.mock.calls[0][0];
       expect(callConfig.data).toBeUndefined();
     });
+
+    it('does not forward the original content-length for a plain JSON POST — axios must compute its own from the re-serialized body, and forwarding the original caused every JSON POST/PUT to hang on a length mismatch', async () => {
+      mockHttp.request.mockReturnValue(of(axiosRaw(201)));
+
+      const req = makeReq('/api/trades', 'POST', { marketId: 'm-1' });
+      req.headers['content-length'] = '9999'; // deliberately wrong/stale, as the original raw body's length would be after axios re-serializes req.body
+      const res = makeRes();
+
+      await service.forward(req, res);
+
+      const callConfig = mockHttp.request.mock.calls[0][0];
+      expect(callConfig.headers['content-length']).toBeUndefined();
+    });
+
+    it('streams the raw request through for multipart/form-data instead of forwarding the (empty) parsed body — Nest\'s global body-parser never populates req.body for file uploads', async () => {
+      mockHttp.request.mockReturnValue(of(axiosRaw(201)));
+
+      const req = makeReq('/api/admin/markets/images', 'POST', {});
+      req.headers['content-type'] = 'multipart/form-data; boundary=----abc123';
+      req.headers['content-length'] = '4096';
+      // In a real request req.body would be {} (unparsed) while req itself
+      // remains the readable stream — asserting the raw req object is what
+      // gets forwarded, not req.body.
+      const res = makeRes();
+
+      await service.forward(req, res);
+
+      const callConfig = mockHttp.request.mock.calls[0][0];
+      expect(callConfig.data).toBe(req);
+      expect(callConfig.headers['content-type']).toBe('multipart/form-data; boundary=----abc123');
+      expect(callConfig.headers['content-length']).toBe('4096');
+    });
   });
 
   // ── forward — user context headers ─────────────────────────────────────────

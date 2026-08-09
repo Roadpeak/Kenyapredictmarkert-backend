@@ -74,11 +74,29 @@ export class ProxyService {
       forwardedHeaders['x-user-kyc-tier'] = String(user.kycTier);
     }
 
+    // Nest's global body-parser only consumes application/json and
+    // x-www-form-urlencoded bodies — a multipart/form-data request (file
+    // uploads) is left untouched, with req.body empty and the raw stream
+    // still readable. Forwarding req.body for those would silently drop
+    // the file entirely, so multipart requests are piped through as a raw
+    // stream instead of using the (empty) parsed body. The original
+    // content-length is forwarded ONLY in this case, since it matches the
+    // still-unconsumed stream; for the normal JSON path axios must compute
+    // its own content-length from the re-serialized req.body, which can
+    // differ in byte length from the original raw request (whitespace,
+    // key order) — forwarding the original there caused a length mismatch
+    // that made every plain JSON POST/PUT hang.
+    const isMultipart = (req.headers['content-type'] ?? '').startsWith('multipart/form-data');
+    const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
+    if (isMultipart) {
+      forwardedHeaders['content-length'] = req.headers['content-length'];
+    }
+
     const config: AxiosRequestConfig = {
       method: req.method as AxiosRequestConfig['method'],
       url: targetUrl,
       headers: forwardedHeaders,
-      data: req.method !== 'GET' && req.method !== 'HEAD' ? req.body : undefined,
+      data: hasBody ? (isMultipart ? req : req.body) : undefined,
       validateStatus: () => true,
       responseType: 'arraybuffer',
     };

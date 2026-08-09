@@ -161,6 +161,40 @@ describe('AdminService', () => {
     });
   });
 
+  // ── uploadMarketImage ───────────────────────────────────────────────────────
+
+  describe('uploadMarketImage', () => {
+    const makeFile = (overrides = {}) => ({
+      buffer: Buffer.from('fake-image-bytes'),
+      originalname: 'photo.jpg',
+      mimetype: 'image/jpeg',
+      ...overrides,
+    });
+
+    it('re-encodes the file as multipart and POSTs to market-service, returning its response', async () => {
+      mockHttp.post.mockReturnValue(of(axiosOk({ url: 'https://res.cloudinary.com/x/y.jpg' })));
+
+      const result = await service.uploadMarketImage(makeFile() as any, 'admin-token');
+
+      expect(mockHttp.post).toHaveBeenCalledWith(
+        expect.stringContaining('/admin/markets/images'),
+        expect.anything(), // a FormData instance
+        expect.objectContaining({
+          headers: expect.objectContaining({ authorization: 'Bearer admin-token' }),
+        }),
+      );
+      expect(result).toEqual({ url: 'https://res.cloudinary.com/x/y.jpg' });
+    });
+
+    it('throws BadRequestException when the downstream upload fails', async () => {
+      mockHttp.post.mockReturnValue(throwError(() => new Error('Cloudinary down')));
+
+      await expect(service.uploadMarketImage(makeFile() as any, 'admin-token')).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+  });
+
   // ── listMarkets ─────────────────────────────────────────────────────────────
 
   describe('listMarkets', () => {

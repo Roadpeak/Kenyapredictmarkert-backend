@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import type { AxiosRequestConfig } from 'axios';
+import FormData from 'form-data';
 import {
   IsString,
   IsNotEmpty,
@@ -113,6 +114,28 @@ export class AdminService {
 
   async updateMarketImage(marketId: string, imageUrl: string, token: string) {
     return this.put(`${this.marketServiceUrl}/api/admin/markets/${marketId}/image`, { imageUrl }, token);
+  }
+
+  // The gateway's generic proxy forwards req.body as JSON — it never parses
+  // multipart bodies, so a file upload can't pass through it as bytes. This
+  // service already terminates the multipart request itself (via
+  // FileInterceptor on the controller route) and re-encodes the file into a
+  // fresh multipart body for the hop to market-service, which is the one
+  // that actually talks to Cloudinary.
+  async uploadMarketImage(file: Express.Multer.File, token: string) {
+    const form = new FormData();
+    form.append('file', file.buffer, { filename: file.originalname, contentType: file.mimetype });
+
+    try {
+      const res = await firstValueFrom(
+        this.http.post<unknown>(`${this.marketServiceUrl}/api/admin/markets/images`, form, {
+          headers: { ...this.headers(token), ...form.getHeaders() },
+        }),
+      );
+      return res.data;
+    } catch (err: unknown) {
+      this.handleHttpError(err, `${this.marketServiceUrl}/api/admin/markets/images`);
+    }
   }
 
   async listMarkets(status?: string, page = 1, limit = 20, token?: string) {
