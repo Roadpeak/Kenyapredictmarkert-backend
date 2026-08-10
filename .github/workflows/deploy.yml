@@ -200,11 +200,50 @@ jobs:
             # Backend deploys never touch the frontend service — that image
             # lives in a GHCR namespace this workflow can't authenticate
             # against, and it's fully owned by the salvatoluis/kpm repo's
-            # own workflow. Enumerate every backend/infra service on pull
-            # and up so the running frontend container is left alone
-            # regardless of compose defaults.
-            BACKEND_SERVICES="postgres redis kafka kafka-init nginx api-gateway auth-service user-service market-service trading-service wallet-service payment-service notification-service feed-service admin-service analytics-service"
+            # own workflow. Discover every non-frontend service from the
+            # compose file itself so a new app never has to be added here
+            # (same reason Dockerfile projects list + prisma-all.sh went
+            # filesystem-driven — see #37).
+            BACKEND_SERVICES=$(docker compose -f docker-compose.prod.yml config --services | grep -v '^frontend$' | tr '\n' ' ')
+            echo "== backend services: $BACKEND_SERVICES =="
             docker compose -f docker-compose.prod.yml pull $BACKEND_SERVICES
+
+            # Bring postgres up first so we can sync schemas against the NEW
+            # image BEFORE recreating the app containers. Failing schema
+            # sync fails the workflow step visibly — old containers keep
+            # serving traffic until the new schema is committed.
+            docker compose -f docker-compose.prod.yml up -d postgres
+            for i in 1 2 3 4 5 6; do
+              docker exec kenyapredict-postgres-1 pg_isready -U "${POSTGRES_USER}" >/dev/null 2>&1 && break
+              [ $i -eq 6 ] && { echo "postgres never became ready"; exit 1; }
+              sleep 5
+            done
+
+            # Prisma schema sync per service — KPM uses `db push` (no
+            # migration files in the repo; dev evolves schemas locally with
+            # `prisma db push` and lands them via git). Push discovers
+            # services dynamically from the image's apps/*/prisma/schema.prisma
+            # so a new service is auto-covered.
+            # ⚠️ --accept-data-loss will DROP columns/tables removed from
+            # the schema — same risk dev accepts when running db push
+            # locally. Long-term fix is `prisma migrate dev` locally +
+            # `migrate deploy` here; flagged to dev separately.
+            echo "== prisma db push per service =="
+            # --no-deps: postgres is already up (checked above); skip
+            # dependency startup so this doesn't try to spin up redis/kafka
+            # for a shell that doesn't need them.
+            docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
+              --entrypoint sh api-gateway \
+              -c '
+                set -e
+                for schema in apps/*/prisma/schema.prisma; do
+                  svc=$(basename $(dirname $(dirname "$schema")))
+                  echo "→ db push: $svc"
+                  npx prisma db push --schema="$schema" --accept-data-loss --skip-generate
+                done
+              '
+
+            # Now recreate the app containers with the new image + synced schema.
             docker compose -f docker-compose.prod.yml up -d $BACKEND_SERVICES
 
             # nginx caches upstream DNS resolution failures during the brief
