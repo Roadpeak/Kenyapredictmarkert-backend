@@ -219,27 +219,23 @@ jobs:
               sleep 5
             done
 
-            # Prisma schema sync per service — KPM uses `db push` (no
-            # migration files in the repo; dev evolves schemas locally with
-            # `prisma db push` and lands them via git). Push discovers
-            # services dynamically from the image's apps/*/prisma/schema.prisma
-            # so a new service is auto-covered.
-            # ⚠️ --accept-data-loss will DROP columns/tables removed from
-            # the schema — same risk dev accepts when running db push
-            # locally. Long-term fix is `prisma migrate dev` locally +
-            # `migrate deploy` here; flagged to dev separately.
-            echo "== prisma db push per service =="
-            # --no-deps: postgres is already up (checked above); skip
-            # dependency startup so this doesn't try to spin up redis/kafka
+            # Prisma migrate deploy per service. Dev authors migrations
+            # locally with `prisma migrate dev --name <change>` (see the
+            # readme). Discovers services dynamically from the image's
+            # apps/*/prisma/schema.prisma so a new service is auto-covered.
+            # migrate deploy is idempotent — already-applied migrations
+            # (per each DB's _prisma_migrations table) are skipped.
+            # --no-deps: postgres already up; skip spinning up redis/kafka
             # for a shell that doesn't need them.
+            echo "== prisma migrate deploy per service =="
             docker compose -f docker-compose.prod.yml run --rm --no-deps -T \
               --entrypoint sh api-gateway \
               -c '
                 set -e
                 for schema in apps/*/prisma/schema.prisma; do
                   svc=$(basename $(dirname $(dirname "$schema")))
-                  echo "→ db push: $svc"
-                  npx prisma db push --schema="$schema" --accept-data-loss --skip-generate
+                  echo "→ migrate deploy: $svc"
+                  npx prisma migrate deploy --schema="$schema"
                 done
               '
 
