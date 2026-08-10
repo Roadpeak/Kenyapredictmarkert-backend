@@ -30,7 +30,8 @@
     "test:unit:watch": "pnpm exec jest --config jest.unit.config.js --watch",
     "test:coverage": "pnpm exec jest --config jest.unit.config.js --coverage",
     "e2e": "pnpm exec jest --config apps/api-gateway-e2e/jest.config.cts --runInBand",
-    "e2e:watch": "pnpm exec jest --config apps/api-gateway-e2e/jest.config.cts --runInBand --watch"
+    "e2e:watch": "pnpm exec jest --config apps/api-gateway-e2e/jest.config.cts --runInBand --watch",
+    "prisma:migrate:new": "bash scripts/prisma-all.sh migrate:dev"
   },
   "private": true,
   "devDependencies": {
