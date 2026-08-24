@@ -20,6 +20,7 @@ import {
   MPESA_SUCCESS_CODE,
   MPESA_ERROR_CODES,
 } from '../mpesa/mpesa.types';
+import type { WithdrawalCompletedPayload } from '@org/types';
 import { InitiateDepositDto, InitiateWithdrawalDto } from './payment.dto';
 
 // Daily limits per KYC tier (KES)
@@ -348,14 +349,21 @@ export class PaymentService {
 
       await this.incrementDailyLimit(payment.userId, 'withdrawal', Number(payment.amountKes));
 
+      // Typed against the shared payload so a missing field is a compile
+      // error rather than an "undefined" rendered into a user's
+      // notification — phone was omitted here and the withdrawal
+      // notification read "sent to undefined via M-Pesa".
+      const withdrawalCompleted: WithdrawalCompletedPayload = {
+        paymentId: payment.id,
+        userId: payment.userId,
+        amountKes: Number(payment.amountKes),
+        phone: payment.phoneNumber,
+        mpesaReceiptNumber,
+      };
+
       await this.kafka.publish(
         KAFKA_TOPICS.PAYMENT_WITHDRAWAL_COMPLETED,
-        {
-          paymentId: payment.id,
-          userId: payment.userId,
-          amountKes: Number(payment.amountKes),
-          mpesaReceiptNumber,
-        },
+        withdrawalCompleted,
         payment.userId,
       );
 
@@ -449,9 +457,14 @@ export class PaymentService {
       type: payment.type,
       status: payment.status,
       amountKes: Number(payment.amountKes),
+      // mpesaCode/updatedAt mirror the history endpoint and the documented
+      // client contract; mpesaReceiptNumber/confirmedAt are kept alongside
+      // them so any existing consumer of those names keeps working.
+      mpesaCode: payment.mpesaReceiptNumber,
       mpesaReceiptNumber: payment.mpesaReceiptNumber,
       initiatedAt: payment.initiatedAt,
       confirmedAt: payment.confirmedAt,
+      updatedAt: (payment.confirmedAt ?? payment.failedAt ?? payment.initiatedAt).toISOString(),
       failureReason: payment.failureReason,
     };
   }
@@ -520,7 +533,7 @@ export class PaymentService {
 
   private async getPaymentHistory(userId: string, type: 'DEPOSIT' | 'WITHDRAWAL', page: number, limit: number) {
     const skip = (page - 1) * limit;
-    const [data, total] = await Promise.all([
+    const [rows, total] = await Promise.all([
       this.prisma.payment.findMany({
         where: { userId, type },
         skip, take: limit,
@@ -528,11 +541,29 @@ export class PaymentService {
         select: {
           id: true, type: true, status: true, amountKes: true,
           mpesaReceiptNumber: true, initiatedAt: true, confirmedAt: true,
-          failureReason: true, phoneNumber: true,
+          failedAt: true, failureReason: true, phoneNumber: true,
         },
       }),
       this.prisma.payment.count({ where: { userId, type } }),
     ]);
+
+    // Emit the documented wire contract (paymentId/mpesaCode/updatedAt)
+    // rather than raw column names. Returning `id`/`mpesaReceiptNumber` and
+    // no timestamp left the client reading undefined, which rendered as
+    // "NaNy ago" in the wallet's history tables. There's no updatedAt column
+    // on Payment, so it's derived from the last state change.
+    const data = rows.map((p) => ({
+      paymentId: p.id,
+      type: p.type,
+      status: p.status,
+      amountKes: Number(p.amountKes),
+      mpesaCode: p.mpesaReceiptNumber,
+      phoneNumber: p.phoneNumber,
+      failureReason: p.failureReason,
+      initiatedAt: p.initiatedAt.toISOString(),
+      updatedAt: (p.confirmedAt ?? p.failedAt ?? p.initiatedAt).toISOString(),
+    }));
+
     return { data, meta: { total, page, limit, totalPages: Math.ceil(total / limit) } };
   }
 

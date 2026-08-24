@@ -383,6 +383,21 @@ describe('PaymentService', () => {
       );
     });
 
+    it('includes phone in WITHDRAWAL_COMPLETED — the notification renders it, and omitting it showed users "sent to undefined via M-Pesa"', async () => {
+      await service.handleB2cResult(successBody as any);
+
+      expect(mockKafka.publish).toHaveBeenCalledWith(
+        expect.stringContaining('withdrawal-completed'),
+        expect.objectContaining({
+          userId: 'user-1',
+          amountKes: expect.any(Number),
+          phone: '254712345678',
+          mpesaReceiptNumber: expect.any(String),
+        }),
+        'user-1',
+      );
+    });
+
     it('marks payment FAILED and releases wallet on failure', async () => {
       await service.handleB2cResult(failBody as any);
       expect(mockPrisma.payment.update).toHaveBeenCalledWith(
@@ -449,6 +464,52 @@ describe('PaymentService', () => {
     it('throws ForbiddenException when payment belongs to different user', async () => {
       mockPrisma.payment.findUnique.mockResolvedValue(makePayment({ userId: 'other-user' }));
       await expect(service.getPaymentStatus('pay-1', 'user-1')).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ── payment history ─────────────────────────────────────────────────────────
+  // The client reads paymentId/mpesaCode/updatedAt. Returning raw column
+  // names (id/mpesaReceiptNumber) and no timestamp left updatedAt undefined,
+  // which the wallet's history table rendered as "NaNy ago".
+
+  describe('getDepositHistory / getWithdrawalHistory', () => {
+    it('returns the documented wire shape, not raw column names', async () => {
+      const confirmed = new Date('2026-08-20T10:00:00.000Z');
+      mockPrisma.payment.findMany.mockResolvedValue([
+        makePayment({
+          id: 'pay-9',
+          mpesaReceiptNumber: 'ABC123',
+          confirmedAt: confirmed,
+          failedAt: null,
+          status: 'COMPLETED',
+        }),
+      ]);
+      mockPrisma.payment.count.mockResolvedValue(1);
+
+      const result = await service.getDepositHistory('user-1', 1, 20);
+
+      expect(result.data[0]).toMatchObject({
+        paymentId: 'pay-9',
+        mpesaCode: 'ABC123',
+        updatedAt: confirmed.toISOString(),
+        amountKes: expect.any(Number),
+      });
+    });
+
+    it('falls back to failedAt then initiatedAt for updatedAt, so the timestamp is never undefined', async () => {
+      const initiated = new Date('2026-08-20T08:00:00.000Z');
+      const failed = new Date('2026-08-20T09:00:00.000Z');
+      mockPrisma.payment.count.mockResolvedValue(2);
+
+      mockPrisma.payment.findMany.mockResolvedValue([
+        makePayment({ confirmedAt: null, failedAt: failed, initiatedAt: initiated, status: 'FAILED' }),
+        makePayment({ confirmedAt: null, failedAt: null, initiatedAt: initiated, status: 'PENDING_MPESA' }),
+      ]);
+
+      const result = await service.getWithdrawalHistory('user-1', 1, 20);
+
+      expect(result.data[0].updatedAt).toBe(failed.toISOString());
+      expect(result.data[1].updatedAt).toBe(initiated.toISOString());
     });
   });
 });
