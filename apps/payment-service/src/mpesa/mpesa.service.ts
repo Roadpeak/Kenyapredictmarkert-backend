@@ -6,6 +6,7 @@ import Redis from 'ioredis';
 import { firstValueFrom } from 'rxjs';
 import { format } from 'date-fns';
 import { publicEncrypt, constants } from 'crypto';
+import { v4 as uuidv4 } from 'uuid';
 import {
   DarajaTokenResponse,
   StkPushRequest,
@@ -168,6 +169,9 @@ export class MpesaService {
       : 'https://sandbox.safaricom.co.ke';
 
     const payload: B2cRequest = {
+      // Mandatory on v3 (optional in v1) — without it Safaricom rejects the
+      // request with 400.002.02 "Invalid OriginatorConversationID".
+      OriginatorConversationID: uuidv4(),
       InitiatorName: initiatorName,
       SecurityCredential: securityCredential,
       CommandID: 'BusinessPayment',
@@ -193,8 +197,17 @@ export class MpesaService {
       );
       return response.data;
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.logger.error(`B2C transfer failed: ${msg}`);
+      // An axios error's .message is only "Request failed with status code
+      // 400" — the actual Safaricom diagnosis (errorCode/errorMessage) lives
+      // in err.response.data. Logging just the message is what forced a
+      // curl-based reproduction to find the missing OriginatorConversationID
+      // above, so the response body is logged too.
+      const axErr = err as { response?: { data?: unknown }; message?: string };
+      const body = axErr.response?.data;
+      this.logger.error(
+        `B2C transfer failed: ${axErr.message ?? String(err)}`,
+        body ? JSON.stringify(body) : undefined,
+      );
       throw new InternalServerErrorException('Failed to initiate M-Pesa withdrawal');
     }
   }

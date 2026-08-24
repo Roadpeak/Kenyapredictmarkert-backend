@@ -166,6 +166,60 @@ describe('MpesaService', () => {
 
   // ── B2C SecurityCredential ─────────────────────────────────────────────────
 
+  describe('b2cTransfer — v3 payload contract', () => {
+    it('sends OriginatorConversationID — mandatory on v3 (optional in v1), and Safaricom rejects the call with 400.002.02 without it', async () => {
+      const service = await buildService(makeConfig());
+      mockRedis.get.mockResolvedValue('tok');
+      mockHttp.post.mockReturnValue(
+        of(axiosResponse({ ConversationID: 'c', OriginatorConversationID: 'o', ResponseCode: '0', ResponseDescription: 'ok' })),
+      );
+
+      await service.b2cTransfer('254712345678', 500, 'https://cb/result', 'https://cb/timeout', 'payout');
+
+      const [url, payload] = mockHttp.post.mock.calls[0];
+      expect(url).toContain('/mpesa/b2c/v3/paymentrequest');
+      expect(payload.OriginatorConversationID).toEqual(expect.any(String));
+      expect(payload.OriginatorConversationID).not.toHaveLength(0);
+    });
+
+    it('generates a fresh OriginatorConversationID per call so retries are not treated as the same transaction', async () => {
+      const service = await buildService(makeConfig());
+      mockRedis.get.mockResolvedValue('tok');
+      mockHttp.post.mockReturnValue(
+        of(axiosResponse({ ConversationID: 'c', OriginatorConversationID: 'o', ResponseCode: '0', ResponseDescription: 'ok' })),
+      );
+
+      await service.b2cTransfer('254712345678', 500, 'https://cb/r', 'https://cb/t', 'one');
+      await service.b2cTransfer('254712345678', 500, 'https://cb/r', 'https://cb/t', 'two');
+
+      const first = mockHttp.post.mock.calls[0][1].OriginatorConversationID;
+      const second = mockHttp.post.mock.calls[1][1].OriginatorConversationID;
+      expect(first).not.toBe(second);
+    });
+
+    it("logs Safaricom's error body, not just axios's opaque 'status code 400' message", async () => {
+      const service = await buildService(makeConfig());
+      mockRedis.get.mockResolvedValue('tok');
+      const logSpy = jest.spyOn(service['logger'], 'error').mockImplementation(() => undefined);
+      mockHttp.post.mockReturnValue(
+        throwError(() => ({
+          message: 'Request failed with status code 400',
+          response: { data: { errorCode: '400.002.02', errorMessage: 'Bad Request - Invalid OriginatorConversationID' } },
+        })),
+      );
+
+      await expect(
+        service.b2cTransfer('254712345678', 500, 'https://cb/r', 'https://cb/t', 'payout'),
+      ).rejects.toThrow();
+
+      // Without the response body in the log this failure was undiagnosable
+      // from prod logs and needed a curl reproduction to identify.
+      const logged = logSpy.mock.calls[0].join(' ');
+      expect(logged).toContain('400.002.02');
+      expect(logged).toContain('Invalid OriginatorConversationID');
+    });
+  });
+
   describe('b2cTransfer — SecurityCredential', () => {
     it('encrypts the initiator password with the configured certificate and Daraja can decrypt it back', async () => {
       const service = await buildService(makeConfig());

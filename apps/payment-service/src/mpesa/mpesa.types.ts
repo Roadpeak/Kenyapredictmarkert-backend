@@ -58,6 +58,13 @@ export interface StkQueryResponse {
 }
 
 export interface B2cRequest {
+  /**
+   * Mandatory on the v3 endpoint (it was optional in v1). Omitting it gets
+   * the request rejected with Safaricom error 400.002.02 "Invalid
+   * OriginatorConversationID". Also doubles as the caller-side idempotency
+   * key Safaricom echoes back on the result callback.
+   */
+  OriginatorConversationID: string;
   InitiatorName: string;
   SecurityCredential: string;
   CommandID: 'BusinessPayment' | 'SalaryPayment' | 'PromotionPayment';

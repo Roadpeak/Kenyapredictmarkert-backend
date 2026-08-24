@@ -85,6 +85,7 @@
     "reflect-metadata": "^0.1.13",
     "rxjs": "^7.8.0",
     "tslib": "^2.3.0",
+    "uuid": "^14.0.0",
     "@org/types": "workspace:*",
     "@org/exceptions": "workspace:*",
     "@org/decorators": "workspace:*",
