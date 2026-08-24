@@ -87,7 +87,7 @@ export class PaymentController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Initiate M-Pesa B2C withdrawal (requires OTP confirmation)' })
   initiateWithdrawal(@Body() dto: InitiateWithdrawalDto, @CurrentUser() user: JwtPayload) {
-    return this.paymentService.initiateWithdrawal(user.sub, user.kycTier, dto);
+    return this.paymentService.initiateWithdrawal(user.sub, user.kycTier, user.phone, dto);
   }
 
   @Get('payments/withdrawals/:id/status')

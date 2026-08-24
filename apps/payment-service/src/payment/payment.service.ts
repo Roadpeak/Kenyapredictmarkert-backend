@@ -207,14 +207,25 @@ export class PaymentService {
 
   // ─── Initiate Withdrawal (B2C) ────────────────────────────────────────────────
 
-  async initiateWithdrawal(userId: string, kycTier: number, dto: InitiateWithdrawalDto) {
+  async initiateWithdrawal(
+    userId: string,
+    kycTier: number,
+    registeredPhone: string,
+    dto: InitiateWithdrawalDto,
+  ) {
     if (kycTier < 1) {
       throw new ForbiddenException(
         'Identity verification (KYC Tier 1) is required before withdrawing. Please submit your National ID.',
       );
     }
 
-    const phone = this.mpesa.normalizePhone(dto.phone);
+    // Payouts always go to the account's own registered number, taken from
+    // the signed JWT rather than the request body. dto.phone is deliberately
+    // ignored: it's client-controlled, and honouring it let a caller drain
+    // their balance to any number they chose. It also broke OTP verification
+    // outright, since the code is issued against the authenticated user while
+    // request-otp resolved a user from whatever number was submitted.
+    const phone = this.mpesa.normalizePhone(registeredPhone);
 
     // Verify OTP (withdrawal_confirm purpose — must be pre-requested)
     await this.verifyWithdrawalOtp(userId, dto.otp);

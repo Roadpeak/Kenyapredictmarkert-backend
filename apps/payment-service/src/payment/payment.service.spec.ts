@@ -267,13 +267,13 @@ describe('PaymentService', () => {
     });
 
     it('throws ForbiddenException when kycTier < 1', async () => {
-      await expect(service.initiateWithdrawal('user-1', 0, dto as any)).rejects.toThrow(ForbiddenException);
+      await expect(service.initiateWithdrawal('user-1', 0, '0712345678', dto as any)).rejects.toThrow(ForbiddenException);
     });
 
     it('throws BadRequestException when OTP verification fails', async () => {
       mockHttp.post
         .mockReturnValueOnce(throwError(() => ({ response: { data: { message: 'Invalid OTP' } } })));
-      await expect(service.initiateWithdrawal('user-1', 1, dto as any)).rejects.toThrow(BadRequestException);
+      await expect(service.initiateWithdrawal('user-1', 1, '0712345678', dto as any)).rejects.toThrow(BadRequestException);
     });
 
     it('sends the internal API key when verifying OTP with auth-service', async () => {
@@ -281,7 +281,7 @@ describe('PaymentService', () => {
       // internal route rejects it with 401, which the catch block here turns
       // into "Invalid or expired OTP" — a confusing failure mode that looks
       // like a user error but is actually a missing header.
-      await service.initiateWithdrawal('user-1', 1, dto as any);
+      await service.initiateWithdrawal('user-1', 1, '0712345678', dto as any);
 
       const [url, body, config] = mockHttp.post.mock.calls[0];
       expect(url).toContain('/internal/verify-otp');
@@ -289,15 +289,36 @@ describe('PaymentService', () => {
       expect(config).toMatchObject({ headers: { 'x-internal-key': expect.anything() } });
     });
 
+    it('pays out to the JWT-derived registered phone, ignoring any phone in the request body', async () => {
+      // The destination number must never be client-controlled: honouring
+      // dto.phone let a caller send their balance to any number, and broke
+      // OTP verification (the code is issued against the authenticated user,
+      // while request-otp resolved a user from the submitted number).
+      await service.initiateWithdrawal(
+        'user-1',
+        1,
+        '0722000111', // registered, from the signed JWT
+        { ...dto, phone: '0799999999' } as any, // attacker-supplied, must be ignored
+      );
+
+      expect(mockMpesa.b2cTransfer).toHaveBeenCalledWith(
+        '254722000111',
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
     it('throws BadRequestException when wallet reserve fails (insufficient funds)', async () => {
       mockHttp.post
         .mockReturnValueOnce(of(axiosOk({ success: true }))) // OTP ok
         .mockReturnValueOnce(throwError(() => ({ response: { data: { message: 'Insufficient balance' } } }))); // reserve fail
-      await expect(service.initiateWithdrawal('user-1', 1, dto as any)).rejects.toThrow(BadRequestException);
+      await expect(service.initiateWithdrawal('user-1', 1, '0712345678', dto as any)).rejects.toThrow(BadRequestException);
     });
 
     it('creates withdrawal and returns conversationId on success', async () => {
-      const result = await service.initiateWithdrawal('user-1', 1, dto as any);
+      const result = await service.initiateWithdrawal('user-1', 1, '0712345678', dto as any);
       expect(result).toMatchObject({
         paymentId: expect.any(String),
         status: 'PROCESSING',
@@ -307,7 +328,7 @@ describe('PaymentService', () => {
 
     it('releases reserved funds when b2cTransfer throws', async () => {
       mockMpesa.b2cTransfer.mockRejectedValue(new Error('B2C failed'));
-      await expect(service.initiateWithdrawal('user-1', 1, dto as any)).rejects.toThrow();
+      await expect(service.initiateWithdrawal('user-1', 1, '0712345678', dto as any)).rejects.toThrow();
       // 3rd post call = release
       expect(mockHttp.post).toHaveBeenCalledWith(
         expect.stringContaining('/release'),
