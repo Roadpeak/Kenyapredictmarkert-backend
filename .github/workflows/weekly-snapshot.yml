@@ -1,0 +1,89 @@
+name: Weekly snapshot
+
+# Off-box safety belt in place of DO's paid daily-backup add-on. Runs every
+# Sunday 02:00 UTC (05:00 EAT — well after the nightly pg-dump at 02:15
+# UTC), takes a DO snapshot of the droplet, and deletes older snapshots
+# tagged for this workflow so we always carry exactly two rolling weekly
+# snapshots (this week + last week — the "current + rollback" pattern).
+#
+# Cost math: one 7GB snapshot = ~$0.42/mo. Two = ~$0.84/mo. DO's daily
+# backup add-on was $4.80/mo on this droplet, so the swap saves ~$4/mo.
+# The nightly local pg_dumpall (installed on the droplet at
+# /home/deploy/pg-dump-nightly.sh) covers finer-grained recovery.
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'   # Sundays 02:00 UTC
+  workflow_dispatch:
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    env:
+      DROPLET_ID: 598055986   # kenyapredict-prod (fra1)
+      SNAPSHOT_PREFIX: kpm-weekly
+      KEEP: 2                 # this week + last week
+    steps:
+      - name: Take snapshot
+        env:
+          DO_TOKEN: ${{ secrets.DO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DO_TOKEN:-}" ]; then
+            echo "::error::DO_TOKEN secret not set on this repo"
+            exit 1
+          fi
+          STAMP=$(date -u +%Y-%m-%d)
+          NAME="${SNAPSHOT_PREFIX}-${STAMP}"
+          echo "── requesting snapshot: $NAME ──"
+          resp=$(curl -sS -X POST "https://api.digitalocean.com/v2/droplets/${DROPLET_ID}/actions" \
+            -H "Authorization: Bearer ${DO_TOKEN}" -H "Content-Type: application/json" \
+            -d "{\"type\":\"snapshot\",\"name\":\"${NAME}\"}")
+          action_id=$(echo "$resp" | jq -r '.action.id // empty')
+          if [ -z "$action_id" ]; then
+            echo "::error::snapshot request failed: $resp"
+            exit 1
+          fi
+          echo "  action id: $action_id"
+          # Poll until completed (or 20 min).
+          for i in $(seq 1 40); do
+            status=$(curl -sS "https://api.digitalocean.com/v2/actions/${action_id}" \
+              -H "Authorization: Bearer ${DO_TOKEN}" | jq -r '.action.status')
+            echo "  $i: $status"
+            case "$status" in
+              completed) break ;;
+              errored)   echo "::error::snapshot errored"; exit 1 ;;
+              *) sleep 30 ;;
+            esac
+          done
+
+      - name: Rotate — keep only the newest KEEP snapshots with our prefix
+        env:
+          DO_TOKEN: ${{ secrets.DO_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl -sS "https://api.digitalocean.com/v2/snapshots?resource_type=droplet&per_page=100" \
+            -H "Authorization: Bearer ${DO_TOKEN}" \
+            | jq -r --arg pre "${SNAPSHOT_PREFIX}" '
+                .snapshots
+                | map(select(.name | startswith($pre)))
+                | sort_by(.created_at)
+                | reverse
+                | .['"${KEEP}"':][]
+                | .id + " " + .name
+              ' \
+            | while read -r id name; do
+                [ -z "$id" ] && continue
+                echo "── removing old snapshot: $id ($name) ──"
+                curl -sS -X DELETE "https://api.digitalocean.com/v2/snapshots/${id}" \
+                  -H "Authorization: Bearer ${DO_TOKEN}" -w "  http=%{http_code}\n"
+              done
+          echo "── kept snapshots (this-week + rollback) ──"
+          curl -sS "https://api.digitalocean.com/v2/snapshots?resource_type=droplet&per_page=100" \
+            -H "Authorization: Bearer ${DO_TOKEN}" \
+            | jq -r --arg pre "${SNAPSHOT_PREFIX}" '
+                .snapshots
+                | map(select(.name | startswith($pre)))
+                | sort_by(.created_at) | reverse
+                | .[] | "  \(.id)  \(.name)  \(.size_gigabytes)GB  \(.created_at)"
+              '
